@@ -211,14 +211,7 @@ jobs:
           cp linux/assets/256x256.png AppDir/ccloud_plus.png
           cp linux/assets/256x256.png AppDir/.DirIcon
 
-          cat << 'EOF' > AppDir/AppRun
-#!/bin/bash
-SELF=$(readlink -f "$0")
-HERE=${SELF%/*}
-export PATH="${HERE}/usr/bin/:${PATH}"
-export LD_LIBRARY_PATH="${HERE}/usr/lib/:${HERE}/usr/bin/lib/:${LD_LIBRARY_PATH}"
-exec "${HERE}/usr/bin/ccloud_plus" "$@"
-EOF
+          printf '#!/bin/bash\nSELF=$(readlink -f "$0")\nHERE=${SELF%%/*}\nexport PATH="${HERE}/usr/bin/:${PATH}"\nexport LD_LIBRARY_PATH="${HERE}/usr/lib/:${HERE}/usr/bin/lib/:${LD_LIBRARY_PATH}"\nexec "${HERE}/usr/bin/ccloud_plus" "$@"\n' > AppDir/AppRun
           chmod +x AppDir/AppRun
 
           wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
