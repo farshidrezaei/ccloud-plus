@@ -173,23 +173,35 @@ abstract final class UpdateService {
 
       // Platform specific installation
       if (Platform.isLinux) {
-        // Make it executable
+        // Make downloaded file executable
         await Process.run('chmod', ['+x', saveFile.path]);
 
         final home = Platform.environment['HOME'] ?? '';
         final localInstallDir = Directory('$home/.local/share/ccloud_plus');
+        await localInstallDir.create(recursive: true);
+
         final targetAppImage = File(
           '$home/.local/share/ccloud_plus/CCloudPlus.AppImage',
         );
 
-        if (await localInstallDir.exists()) {
-          // Replace local installed AppImage
-          await saveFile.copy(targetAppImage.path);
-          await Process.run('chmod', ['+x', targetAppImage.path]);
-          return 'بروزرسانی با موفقیت دانلود و در سیستم شما جایگزین شد! لطفاً برنامه را مجدداً راه‌اندازی کنید.';
-        } else {
-          return 'فایل بروزرسانی در مسیر زیر ذخیره شد:\n${saveFile.path}';
-        }
+        // Replace local installed AppImage
+        await saveFile.copy(targetAppImage.path);
+        await Process.run('chmod', ['+x', targetAppImage.path]);
+
+        // Ensure ~/.local/bin/ccloud_plus launcher exists and prioritizes the new AppImage
+        final binDir = Directory('$home/.local/bin');
+        await binDir.create(recursive: true);
+        final launcherFile = File('$home/.local/bin/ccloud_plus');
+        await launcherFile.writeAsString('''#!/bin/bash
+if [ -f "\$HOME/.local/share/ccloud_plus/CCloudPlus.AppImage" ]; then
+    exec "\$HOME/.local/share/ccloud_plus/CCloudPlus.AppImage" "\$@"
+else
+    exec "\$HOME/.local/share/ccloud_plus/bundle/ccloud_plus" "\$@"
+fi
+''');
+        await Process.run('chmod', ['+x', launcherFile.path]);
+
+        return 'بروزرسانی با موفقیت دانلود و در سیستم شما جایگزین شد! لطفاً روی دکمه «راه‌اندازی مجدد برنامه» کلیک کنید.';
       } else if (Platform.isWindows) {
         // Run Windows installer
         await Process.start(saveFile.path, []);
