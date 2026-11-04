@@ -9,6 +9,7 @@ import '../core/widgets/featured_hero_carousel.dart';
 import '../core/widgets/media_filter_bar.dart';
 import '../core/widgets/responsive_media_grid.dart';
 import '../providers/genre_provider.dart';
+import '../core/widgets/shimmer_skeleton.dart';
 import '../providers/movie_provider.dart';
 import '../utils/storage_utils.dart';
 import '../widgets/media_card.dart';
@@ -108,7 +109,7 @@ class _MoviesScreenState extends State<MoviesScreen> {
               child: Consumer<MovieProvider>(
                 builder: (context, movieProvider, child) {
                   if (movieProvider.isLoading && movieProvider.movies.isEmpty) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const ShimmerGridPlaceholder();
                   }
 
                   if (movieProvider.errorMessage.isNotEmpty) {

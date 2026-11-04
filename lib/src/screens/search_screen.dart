@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../core/widgets/responsive_media_grid.dart';
+import '../core/widgets/shimmer_skeleton.dart';
 import '../widgets/media_card.dart';
 import '../providers/search_provider.dart';
 import '../models/poster.dart';
@@ -121,7 +122,7 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Consumer<SearchProvider>(
                 builder: (context, searchProvider, child) {
                   if (searchProvider.isLoading) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const ShimmerGridPlaceholder();
                   }
 
                   if (searchProvider.errorMessage != null) {

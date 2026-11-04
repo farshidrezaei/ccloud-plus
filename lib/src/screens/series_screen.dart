@@ -9,6 +9,7 @@ import '../core/widgets/featured_hero_carousel.dart';
 import '../core/widgets/media_filter_bar.dart';
 import '../core/widgets/responsive_media_grid.dart';
 import '../providers/genre_provider.dart';
+import '../core/widgets/shimmer_skeleton.dart';
 import '../providers/series_provider.dart';
 import '../utils/storage_utils.dart';
 import '../widgets/media_card.dart';
@@ -115,7 +116,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
                 builder: (context, seriesProvider, child) {
                   if (seriesProvider.isLoading &&
                       seriesProvider.series.isEmpty) {
-                    return const Center(child: CircularProgressIndicator());
+                    return const ShimmerGridPlaceholder();
                   }
 
                   if (seriesProvider.errorMessage.isNotEmpty) {

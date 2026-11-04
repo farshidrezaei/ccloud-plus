@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'src/core/cache/cache_manager.dart';
 import 'src/navigation/app_router.dart';
 import 'src/utils/theme_manager.dart';
 import 'src/providers/app_settings_provider.dart';
@@ -14,9 +15,13 @@ import 'src/providers/download_provider.dart';
 import 'src/providers/mini_player_provider.dart';
 import 'package:media_kit/media_kit.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   // Initialize media_kit
   MediaKit.ensureInitialized();
+
+  // Initialize local metadata cache
+  await CacheManager.instance.init();
 
   runApp(
     MultiProvider(
