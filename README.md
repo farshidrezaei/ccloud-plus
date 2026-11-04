@@ -22,6 +22,7 @@
 
 - [🌟 Upstream Attribution & Heartfelt Gratitude](#-upstream-attribution--heartfelt-gratitude)
 - [✨ Why CCloud+? (Feature Comparison)](#-why-ccloud-feature-comparison)
+- [📚 Full Documentation & Guides](#-full-documentation--guides)
 - [🚀 Key Features](#-key-features)
   - [1. 🎨 Cinevex OLED Theme & Fluid Interface](#1--cinevex-oled-theme--fluid-interface)
   - [2. 🎠 Featured Hero Spotlight Carousel](#2--featured-hero-spotlight-carousel)
@@ -39,6 +40,21 @@
 - [📂 Project Architecture](#-project-architecture)
 - [🤝 Contributing](#-contributing)
 - [📄 License & Credits](#-license--credits)
+
+---
+
+## 📚 Full Documentation & Guides
+
+Comprehensive documentation tailored for both developers, users, and AI assistants:
+
+| Document | Audience | Description |
+|:---|:---:|:---|
+| [**Architecture Guide**](docs/ARCHITECTURE.md) | 👨‍💻 Developers | System design, Provider state pipeline, MPV engine binding, and chunked downloader internals |
+| [**Features Deep-Dive**](docs/FEATURES.md) | 🎬 Users & Devs | In-depth breakdown of all 8 flagship features with usage walkthroughs |
+| [**Development Guide**](docs/DEVELOPMENT.md) | 🛠️ Contributors | Local environment setup, dependencies, formatting, static analysis, and packaging |
+| [**FAQ & Troubleshooting**](docs/FAQ.md) | ❓ All Users | Common solutions for DNS bypass, MPV Linux libraries, Windows VC++ runtimes, and subtitles |
+| [**LLM Standard (llms.txt)**](llms.txt) | 🤖 AI / Agents | High-density LLM context conforming to the `llmstxt.org` specification |
+| [**Agent Operating Manual**](AGENTS.md) | 🤖 AI / Agents | Complete architectural invariants and workflow instructions for autonomous coding agents |
 
 ---
 

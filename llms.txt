@@ -1,0 +1,42 @@
+# CCloud+ (CCloud Plus)
+
+> High-performance, cinematic desktop streaming and chunked download client for movies and series with Persian subtitles and dubbed audio. Built with Flutter Desktop and MPV engine.
+
+## Overview
+- Project Name: CCloud+ (CCloud Plus)
+- Package Name: ccloud_plus
+- Bundle ID: com.farshidrezaei.ccloud_plus
+- Platforms: Linux (GTK 3), Windows (Win32), macOS (AppKit)
+- Upstream Base: code3-dev/CCloud-GUI (by Hossein Pira)
+- Current Version: v2.0.0
+- Framework: Flutter 3.x, Dart 3.x, Provider (ChangeNotifier), GoRouter, MediaKit (libmpv)
+
+## Key Technical Subsystems
+- **Video Engine**: `media_kit` with native `libmpv` binding for hardware-accelerated H.264/HEVC/AV1 playback.
+- **Download Engine**: `DownloadService` using chunked HTTP range requests (`Range: bytes=start-end`), pause/resume support, live speed (MB/s) and ETA calculations, stored via `StorageUtils`.
+- **Mini-Player (PiP)**: `MiniPlayerProvider` + `FloatingMiniPlayer` docked in `AppShell` with seamless zero-buffering fullscreen restoration.
+- **Subtitle Syncer**: Live runtime delay offset tuner (`-1.0s` to `+1.0s`) calling `Player.setSubtitleDelay()`, plus custom local file picker for `.srt`/`.vtt`/`.ass`/`.sub`.
+- **Anti-Sanction DNS**: Built-in bypass sheet with ping latency testing for Shecan, 403.online, Electro, and Radar Game DNS.
+- **Error Handling**: `AppErrorHandler` translating TLS/Handshake, Socket, and HTTP 5xx errors into Persian diagnostic cards with 1-click retry.
+
+## Essential Commands
+- Run app: `flutter run -d linux` (or `-d windows`, `-d macos`)
+- Static analysis: `flutter analyze --fatal-infos`
+- Formatting: `dart format .`
+- Rebuild icons: `dart run generate_icons.dart`
+- Linux build: `flutter build linux --release`
+- Windows build: `flutter build windows --release`
+- macOS build: `flutter build macos --release --no-tree-shake-icons`
+
+## Core Directory Map
+- `lib/main.dart`: App entry point, window manager configuration, provider initialization.
+- `lib/src/core/config/app_config.dart`: App constants, API endpoints, upstream attribution.
+- `lib/src/core/constants/app_colors.dart`: OLED Cinevex dark palette (`#090A0E`, `#E50914`).
+- `lib/src/core/errors/app_error_handler.dart`: Persian error diagnostics classifier.
+- `lib/src/core/routes/app_router.dart`: Declarative GoRouter configuration.
+- `lib/src/core/widgets/`: Core UI components (Hero Carousel, Filters, DNS Bypass, Media Cards).
+- `lib/src/models/`: Immutable data models (`Movie`, `Series`, `Episode`, `DownloadTask`).
+- `lib/src/providers/`: State management providers (`MovieProvider`, `PlayerProvider`, `DownloadProvider`, `MiniPlayerProvider`).
+- `lib/src/screens/`: Feature screens (Movies, Series, VideoPlayer, Downloads, Settings).
+- `lib/src/services/`: Background services (`DownloadService`, `StorageUtils`).
+- `lib/src/widgets/`: Layout components (`AppShell`, `SidebarNavigation`, `FloatingMiniPlayer`).
