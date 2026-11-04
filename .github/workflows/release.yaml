@@ -1,0 +1,310 @@
+name: Build and Release CCloud+
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v2.0.0)'
+        required: true
+        default: 'v2.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Executable
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y
+        shell: cmd
+
+      - name: Build Inno Setup Installer
+        run: |
+          cd windows\installer
+          ISCC.exe CCloud.iss
+        shell: cmd
+
+      - name: Prepare Windows Release Artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^version:' pubspec.yaml | cut -d ':' -f 2 | tr -d ' ' | cut -d '+' -f 1)
+          
+          # Installer
+          cp windows/installer/ccloud_plus-setup.exe dist/CCloudPlus-${VERSION}-Windows-Setup.exe
+          
+          # Portable ZIP
+          mkdir -p build/windows/x64/runner/Release/portable
+          cp -r build/windows/x64/runner/Release/* build/windows/x64/runner/Release/portable/ 2>/dev/null || true
+          7z a -tzip dist/CCloudPlus-${VERSION}-Windows-Portable.zip ./build/windows/x64/runner/Release/* -xr!portable
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: dist/*
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS Universal Release
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Enable macOS desktop support
+        run: flutter config --enable-macos-desktop
+
+      - name: Build macOS App
+        run: flutter build macos --release --no-tree-shake-icons
+
+      - name: Create DMG & ZIP Packages
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^version:' pubspec.yaml | cut -d ':' -f 2 | tr -d ' ' | cut -d '+' -f 1)
+          APP_PATH="build/macos/Build/Products/Release/ccloud_plus.app"
+          
+          # Create ZIP archive
+          zip -r "dist/CCloudPlus-${VERSION}-macOS-Universal.zip" "$APP_PATH"
+          
+          # Create DMG
+          brew install create-dmg || true
+          create-dmg \
+            --volname "CCloud Plus Installer" \
+            --window-pos 200 120 \
+            --window-size 800 400 \
+            --icon-size 100 \
+            --app-drop-link 600 185 \
+            "dist/CCloudPlus-${VERSION}-macOS-Universal.dmg" \
+            "$APP_PATH" || {
+              echo "create-dmg failed, falling back to hdiutil..."
+              hdiutil create -volname "CCloud Plus" -srcfolder "$APP_PATH" -ov -format UDZO "dist/CCloudPlus-${VERSION}-macOS-Universal.dmg"
+            }
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: dist/*
+          if-no-files-found: error
+
+  build-linux:
+    name: Build Linux Release (AppImage, DEB, RPM, Tarball)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev desktop-file-utils libgdk-pixbuf2.0-dev \
+            libmpv-dev libepoxy-dev librsvg2-dev libgirepository1.0-dev \
+            libayatana-appindicator3-dev rpm ruby ruby-dev rubygems build-essential
+          sudo gem install fpm
+        shell: bash
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Linux Bundle
+        run: flutter build linux --release
+
+      - name: Package Linux (Tarball, DEB, RPM, AppImage)
+        run: |
+          mkdir -p dist
+          VERSION=$(grep '^version:' pubspec.yaml | cut -d ':' -f 2 | tr -d ' ' | cut -d '+' -f 1)
+
+          # 1. Standalone Tarball
+          tar -czf "dist/CCloudPlus-${VERSION}-Linux-x64.tar.gz" -C build/linux/x64/release bundle/
+
+          # 2. Prepare package directory structure for DEB & RPM
+          mkdir -p ccloud-pkg/usr/bin
+          mkdir -p ccloud-pkg/usr/lib/ccloud_plus
+          mkdir -p ccloud-pkg/usr/share/applications
+          mkdir -p ccloud-pkg/usr/share/icons/hicolor/256x256/apps
+          mkdir -p ccloud-pkg/usr/share/icons/hicolor/128x128/apps
+          mkdir -p ccloud-pkg/usr/share/icons/hicolor/64x64/apps
+          mkdir -p ccloud-pkg/usr/share/icons/hicolor/32x32/apps
+
+          cp -r build/linux/x64/release/bundle/* ccloud-pkg/usr/bin/
+          cp linux/runner/ccloud.desktop ccloud-pkg/usr/share/applications/ccloud_plus.desktop
+          cp linux/assets/256x256.png ccloud-pkg/usr/share/icons/hicolor/256x256/apps/ccloud_plus.png
+          cp linux/assets/128x128.png ccloud-pkg/usr/share/icons/hicolor/128x128/apps/ccloud_plus.png
+          cp linux/assets/64x64.png ccloud-pkg/usr/share/icons/hicolor/64x64/apps/ccloud_plus.png
+          cp linux/assets/32x32.png ccloud-pkg/usr/share/icons/hicolor/32x32/apps/ccloud_plus.png
+
+          # 3. Create DEB package
+          fpm -s dir -t deb \
+            -n ccloud-plus \
+            -v "$VERSION" \
+            --description "CCloud+ (CCloud Plus) - Modern Desktop Streaming Platform" \
+            --url "https://github.com/farshidrezaei/ccloud-plus" \
+            --maintainer "Farshid Rezaei <farshid.net1@gmail.com>" \
+            --vendor "Farshid Rezaei" \
+            --license "MIT" \
+            --category "video" \
+            --depends "libgtk-3-0" \
+            --depends "liblzma5" \
+            --depends "libmpv1 | libmpv2" \
+            -C ccloud-pkg \
+            --package "dist/ccloud-plus_${VERSION}_amd64.deb" \
+            .
+
+          # 4. Create RPM package
+          fpm -s dir -t rpm \
+            -n ccloud-plus \
+            -v "$VERSION" \
+            --description "CCloud+ (CCloud Plus) - Modern Desktop Streaming Platform" \
+            --url "https://github.com/farshidrezaei/ccloud-plus" \
+            --maintainer "Farshid Rezaei <farshid.net1@gmail.com>" \
+            --vendor "Farshid Rezaei" \
+            --license "MIT" \
+            --category "Applications/Multimedia" \
+            --depends "gtk3" \
+            --depends "xz-libs" \
+            -C ccloud-pkg \
+            --package "dist/ccloud-plus-${VERSION}-1.x86_64.rpm" \
+            .
+
+          # 5. Create AppImage using official appimagetool
+          echo "Packaging AppImage..."
+          mkdir -p AppDir/usr/bin
+          cp -r build/linux/x64/release/bundle/* AppDir/usr/bin/
+          cp linux/runner/ccloud.desktop AppDir/ccloud_plus.desktop
+          cp linux/assets/256x256.png AppDir/ccloud_plus.png
+          cp linux/assets/256x256.png AppDir/.DirIcon
+
+          cat << 'EOF' > AppDir/AppRun
+#!/bin/bash
+SELF=$(readlink -f "$0")
+HERE=${SELF%/*}
+export PATH="${HERE}/usr/bin/:${PATH}"
+export LD_LIBRARY_PATH="${HERE}/usr/lib/:${HERE}/usr/bin/lib/:${LD_LIBRARY_PATH}"
+exec "${HERE}/usr/bin/ccloud_plus" "$@"
+EOF
+          chmod +x AppDir/AppRun
+
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool-x86_64.AppImage
+          ./appimagetool-x86_64.AppImage --appimage-extract-and-run AppDir "dist/CCloudPlus-${VERSION}-Linux-x86_64.AppImage" || true
+        shell: bash
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-release
+          path: dist/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Determine Version and Tag
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "TAG=$TAG" >> $GITHUB_OUTPUT
+          VERSION=$(grep '^version:' pubspec.yaml | cut -d ':' -f 2 | tr -d ' ' | cut -d '+' -f 1)
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate Checksums
+        run: |
+          cd artifacts
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Publish Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.TAG }}
+          name: "CCloud+ ${{ steps.vars.outputs.TAG }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/*
+          body: |
+            # 🎬 CCloud+ (CCloud Plus) ${{ steps.vars.outputs.TAG }}
+
+            A modernized, high-performance, cinematic desktop streaming and download client for movies and series with Persian subtitles and dubbed audio.
+
+            ---
+
+            ### 📦 Download Pre-Built Binaries
+
+            | Platform | Package Format | Download Link |
+            |:---|:---:|:---|
+            | **Windows (x64)** | Setup Installer (`.exe`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Setup.exe) |
+            | **Windows (x64)** | Portable ZIP (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Portable.zip) |
+            | **macOS (Universal)** | Apple Disk Image (`.dmg`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.dmg) |
+            | **macOS (Universal)** | Compressed App (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.zip) |
+            | **Linux (x64)** | AppImage Standalone | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x86_64.AppImage) |
+            | **Linux (x64)** | Debian / Ubuntu (`.deb`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus_${{ steps.vars.outputs.VERSION }}_amd64.deb) |
+            | **Linux (x64)** | Fedora / RHEL (`.rpm`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus-${{ steps.vars.outputs.VERSION }}-1.x86_64.rpm) |
+            | **Linux (x64)** | Binary Tarball (`.tar.gz`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x64.tar.gz) |
+
+            ---
+
+            ### ⚠️ Important Notice for Windows Users
+            If you encounter runtime DLL errors on Windows, install the official [Microsoft Visual C++ Redistributable 2015–2022](https://learn.microsoft.com/en-US/cpp/windows/latest-supported-vc-redist).
+
+            ### 🐧 Linux Notes
+            Ensure media playback libraries are installed:
+            `sudo apt-get install libmpv1 libmpv2 mpv`
+
+            ---
+
+            ### 🌟 Upstream Attribution
+            *Special gratitude to **Hossein Pira ([@code3-dev](https://github.com/code3-dev))** for creating the original [CCloud-GUI](https://github.com/code3-dev/CCloud-GUI) foundation upon which CCloud+ is evolved.*

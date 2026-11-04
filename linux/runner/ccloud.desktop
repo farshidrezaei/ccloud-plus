@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=CCloud+
+Comment=CCloud Plus - Free Movie and Series Streaming Platform
+Exec=ccloud_plus
+Icon=ccloud_plus
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Recorder;
+StartupWMClass=ccloud_plus
