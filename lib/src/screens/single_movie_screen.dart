@@ -75,6 +75,20 @@ class _SingleMovieScreenState extends State<SingleMovieScreen> {
   }
 
   void _playSource(Source source) {
+    if (source.url.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'لینک پخش برای این کیفیت موجود نیست',
+              style: GoogleFonts.vazirmatn(),
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
     if (settings.defaultPlayer == DefaultPlayer.vlc) {
       _playWithVlc(source.url);
@@ -84,6 +98,7 @@ class _SingleMovieScreenState extends State<SingleMovieScreen> {
   }
 
   void _playInApp(String url, String title) {
+    if (url.trim().isEmpty) return;
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (context) =>

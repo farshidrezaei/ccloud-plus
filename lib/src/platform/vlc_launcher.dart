@@ -35,8 +35,10 @@ class VLCLauncher {
       for (final path in vlcPaths) {
         final File vlcExecutable = File(path);
         if (await vlcExecutable.exists()) {
-          final result = await Process.run(path, [url]);
-          return result.exitCode == 0;
+          final process = await Process.start(path, [
+            url,
+          ], mode: ProcessStartMode.detached);
+          return process.pid > 0;
         }
       }
 
@@ -52,16 +54,20 @@ class VLCLauncher {
     try {
       final whichResult = await Process.run('which', ['vlc']);
       if (whichResult.exitCode == 0 &&
-          (whichResult.stdout as String).isNotEmpty) {
-        final result = await Process.run('vlc', [url]);
-        return result.exitCode == 0;
+          (whichResult.stdout as String).trim().isNotEmpty) {
+        final process = await Process.start('vlc', [
+          url,
+        ], mode: ProcessStartMode.detached);
+        return process.pid > 0;
       }
 
       const vlcPath = '/usr/bin/vlc';
       final File vlcExecutable = File(vlcPath);
       if (await vlcExecutable.exists()) {
-        final result = await Process.run(vlcPath, [url]);
-        return result.exitCode == 0;
+        final process = await Process.start(vlcPath, [
+          url,
+        ], mode: ProcessStartMode.detached);
+        return process.pid > 0;
       }
 
       final Uri uri = Uri.parse(url);
@@ -74,8 +80,12 @@ class VLCLauncher {
 
   static Future<bool> _launchOnMacOS(String url) async {
     try {
-      final result = await Process.run('open', ['-a', 'VLC', url]);
-      return result.exitCode == 0;
+      final process = await Process.start('open', [
+        '-a',
+        'VLC',
+        url,
+      ], mode: ProcessStartMode.detached);
+      return process.pid > 0;
     } catch (e) {
       debugPrint('Error launching VLC on macOS: $e');
       return false;

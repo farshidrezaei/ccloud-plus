@@ -32,7 +32,12 @@ class BaseRepository {
         // Stale-While-Revalidate
         final stale = cache.get(primaryUrl, allowStale: true);
         if (stale != null) {
-          unawaited(_fetchAndCache(primaryUrl, effectiveTtl));
+          unawaited(
+            _fetchAndCache(primaryUrl, effectiveTtl).catchError((e) {
+              debugPrint('Background cache refresh failed: $e');
+              return '';
+            }),
+          );
           return stale;
         }
       }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../core/widgets/error_retry_view.dart';
 import '../core/widgets/responsive_media_grid.dart';
 import '../core/widgets/shimmer_skeleton.dart';
 import '../widgets/media_card.dart';
@@ -126,37 +127,9 @@ class _SearchScreenState extends State<SearchScreen> {
                   }
 
                   if (searchProvider.errorMessage != null) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            'خطا: ${searchProvider.errorMessage}',
-                            style: GoogleFonts.vazirmatn(
-                              fontSize: 16,
-                              color: Theme.of(context).colorScheme.error,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'لطفاً دوباره تلاش کنید',
-                            style: GoogleFonts.vazirmatn(
-                              fontSize: 14,
-                              color: Theme.of(
-                                context,
-                              ).textTheme.bodyMedium?.color,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          ElevatedButton(
-                            onPressed: searchProvider.triggerSearch,
-                            child: Text(
-                              'تلاش مجدد',
-                              style: GoogleFonts.vazirmatn(),
-                            ),
-                          ),
-                        ],
-                      ),
+                    return ErrorRetryView(
+                      errorMessage: searchProvider.errorMessage,
+                      onRetry: searchProvider.triggerSearch,
                     );
                   }
 

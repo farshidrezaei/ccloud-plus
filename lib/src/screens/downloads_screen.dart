@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -423,6 +424,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               if (isCompleted) ...[
                 ElevatedButton.icon(
                   onPressed: () {
+                    if (!File(task.localPath).existsSync()) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'فایل ویدیو روی حافظه دستگاه یافت نشد.',
+                            style: GoogleFonts.vazirmatn(),
+                          ),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                      return;
+                    }
                     Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (context) => VideoPlayerScreen(

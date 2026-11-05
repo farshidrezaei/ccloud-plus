@@ -88,26 +88,32 @@ class _DnsBypassSheetState extends State<DnsBypassSheet> {
     });
 
     final stopwatch = Stopwatch()..start();
+    final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
     try {
-      final client = HttpClient()
-        ..connectionTimeout = const Duration(seconds: 4);
       final req = await client.getUrl(
         Uri.parse('https://server-hi-speed-iran.info/api/status'),
       );
       final res = await req.close();
       stopwatch.stop();
 
-      setState(() {
-        _isTesting = false;
-        _testResult =
-            'اتصال به سرور برقرار است (کد ${res.statusCode} - پینگ: ${stopwatch.elapsedMilliseconds}ms)';
-      });
+      if (mounted) {
+        setState(() {
+          _isTesting = false;
+          _testResult =
+              'اتصال به سرور برقرار است (کد ${res.statusCode} - پینگ: ${stopwatch.elapsedMilliseconds}ms)';
+        });
+      }
     } catch (e) {
       stopwatch.stop();
-      setState(() {
-        _isTesting = false;
-        _testResult = 'ارتباط مسدود است؛ تنظیم DNS یا فیلترشکن را تغییر دهید.';
-      });
+      if (mounted) {
+        setState(() {
+          _isTesting = false;
+          _testResult =
+              'ارتباط مسدود است؛ تنظیم DNS یا فیلترشکن را تغییر دهید.';
+        });
+      }
+    } finally {
+      client.close(force: true);
     }
   }
 

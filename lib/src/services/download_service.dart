@@ -17,14 +17,22 @@ class DownloadController {
 
   void pause() {
     _isPaused = true;
-    _activeRequest?.abort();
-    _activeSink?.close();
+    try {
+      _activeRequest?.abort();
+    } catch (_) {}
+    try {
+      _activeSink?.close();
+    } catch (_) {}
   }
 
   void cancel() {
     _isCancelled = true;
-    _activeRequest?.abort();
-    _activeSink?.close();
+    try {
+      _activeRequest?.abort();
+    } catch (_) {}
+    try {
+      _activeSink?.close();
+    } catch (_) {}
   }
 }
 
@@ -145,6 +153,9 @@ class DownloadService {
       }
       await partFile.rename(destinationPath);
     } finally {
+      try {
+        await controller._activeSink?.close();
+      } catch (_) {}
       client.close(force: true);
     }
   }

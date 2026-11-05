@@ -1,4 +1,6 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'src/core/cache/cache_manager.dart';
 import 'src/navigation/app_router.dart';
 import 'src/utils/theme_manager.dart';
@@ -17,6 +19,15 @@ import 'package:media_kit/media_kit.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+    try {
+      await windowManager.ensureInitialized();
+    } catch (e) {
+      debugPrint('windowManager init error: $e');
+    }
+  }
+
   // Initialize media_kit
   MediaKit.ensureInitialized();
 

@@ -42,6 +42,7 @@ class _FeaturedHeroCarouselState extends State<FeaturedHeroCarousel> {
       if (!mounted) return;
       final count = _featuredItems.length;
       if (count <= 1) return;
+      if (!_pageController.hasClients) return;
       final next = (_currentIndex + 1) % count;
       _pageController.animateToPage(
         next,
@@ -156,7 +157,7 @@ class _HeroSlideItemState extends State<_HeroSlideItem> {
 
   void _watchMovie() {
     final item = widget.item;
-    if (item.sources.isNotEmpty) {
+    if (item.sources.isNotEmpty && item.sources.first.url.trim().isNotEmpty) {
       Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute(
           builder: (context) => VideoPlayerScreen(

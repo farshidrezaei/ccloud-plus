@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import '../core/widgets/error_retry_view.dart';
 import '../core/widgets/responsive_media_grid.dart';
 import '../widgets/media_card.dart';
 import '../providers/countries_provider.dart';
@@ -111,37 +112,9 @@ class _CountriesScreenState extends State<CountriesScreen> {
                 }
 
                 if (countriesProvider.errorMessage != null) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'خطا: ${countriesProvider.errorMessage}',
-                          style: GoogleFonts.vazirmatn(
-                            fontSize: 16,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'لطفاً دوباره تلاش کنید',
-                          style: GoogleFonts.vazirmatn(
-                            fontSize: 14,
-                            color: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.color,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: countriesProvider.loadCountries,
-                          child: Text(
-                            'تلاش مجدد',
-                            style: GoogleFonts.vazirmatn(),
-                          ),
-                        ),
-                      ],
-                    ),
+                  return ErrorRetryView(
+                    errorMessage: countriesProvider.errorMessage,
+                    onRetry: countriesProvider.loadCountries,
                   );
                 }
 
@@ -289,39 +262,11 @@ class _CountriesScreenState extends State<CountriesScreen> {
 
                 if (mediaProvider.errorMessage != null &&
                     mediaProvider.mediaItems.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'خطا: ${mediaProvider.errorMessage}',
-                          style: GoogleFonts.vazirmatn(
-                            fontSize: 16,
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'لطفاً دوباره تلاش کنید',
-                          style: GoogleFonts.vazirmatn(
-                            fontSize: 14,
-                            color: Theme.of(
-                              context,
-                            ).textTheme.bodyMedium?.color,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: () => mediaProvider.loadMediaByCountry(
-                            _selectedCountry!.id,
-                            filterType: mediaProvider.currentFilter,
-                          ),
-                          child: Text(
-                            'تلاش مجدد',
-                            style: GoogleFonts.vazirmatn(),
-                          ),
-                        ),
-                      ],
+                  return ErrorRetryView(
+                    errorMessage: mediaProvider.errorMessage,
+                    onRetry: () => mediaProvider.loadMediaByCountry(
+                      _selectedCountry!.id,
+                      filterType: mediaProvider.currentFilter,
                     ),
                   );
                 }

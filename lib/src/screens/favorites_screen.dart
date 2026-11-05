@@ -34,17 +34,24 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     });
     try {
       final favorites = await StorageUtils.loadFavoritesWithTimestamp();
-      setState(() {
-        _favorites = favorites;
-        _isLoading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
       if (mounted) {
+        setState(() {
+          _favorites = favorites;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('خطا در بارگذاری علاقه‌مندی‌ها')),
+          SnackBar(
+            content: Text(
+              'خطا در بارگذاری علاقه‌مندی‌ها',
+              style: GoogleFonts.vazirmatn(),
+            ),
+          ),
         );
       }
     }
@@ -137,18 +144,28 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
     if (confirm == true) {
       try {
         await StorageUtils.clearAllFavorites();
-        setState(() {
-          _favorites = [];
-        });
         if (mounted) {
+          setState(() {
+            _favorites = [];
+          });
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('همه علاقه‌مندی‌ها حذف شدند')),
+            SnackBar(
+              content: Text(
+                'همه علاقه‌مندی‌ها حذف شدند',
+                style: GoogleFonts.vazirmatn(),
+              ),
+            ),
           );
         }
       } catch (e) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('خطا در حذف علاقه‌مندی‌ها')),
+            SnackBar(
+              content: Text(
+                'خطا در حذف علاقه‌مندی‌ها',
+                style: GoogleFonts.vazirmatn(),
+              ),
+            ),
           );
         }
       }

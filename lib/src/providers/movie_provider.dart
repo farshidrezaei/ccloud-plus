@@ -83,18 +83,29 @@ class MovieProvider with ChangeNotifier {
           .where((movie) => !containsFarsiOrArabic(movie.title))
           .toList();
 
-      if (filteredMovies.isEmpty && newMovies.isNotEmpty) {
+      var currentNewMovies = newMovies;
+      var currentFiltered = filteredMovies;
+      int emptyAttempts = 0;
+
+      while (currentFiltered.isEmpty &&
+          currentNewMovies.isNotEmpty &&
+          emptyAttempts < 5) {
         _currentPage++;
-        _isLoading = false;
-        notifyListeners();
-        await loadMovies();
-        return;
+        emptyAttempts++;
+        currentNewMovies = await _movieRepository.getMovies(
+          page: _currentPage,
+          genreId: _selectedGenreId,
+          filterType: _selectedFilter,
+        );
+        currentFiltered = currentNewMovies
+            .where((movie) => !containsFarsiOrArabic(movie.title))
+            .toList();
       }
 
-      if (newMovies.isEmpty) {
+      if (currentNewMovies.isEmpty) {
         _hasMore = false;
       } else {
-        _movies.addAll(filteredMovies);
+        _movies.addAll(currentFiltered);
         _currentPage++;
       }
     } catch (e) {

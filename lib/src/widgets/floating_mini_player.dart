@@ -119,33 +119,54 @@ class _FloatingMiniPlayerState extends State<FloatingMiniPlayer> {
                               // Center: Play / Pause
                               Center(
                                 child: StreamBuilder<bool>(
-                                  stream: player.stream.playing,
-                                  builder: (context, snapshot) {
-                                    final isPlaying = snapshot.data ?? false;
-                                    return Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: AppColors.brandRed.withValues(
-                                          alpha: 0.9,
-                                        ),
-                                        boxShadow: const [
-                                          BoxShadow(
-                                            color: AppColors.brandRedGlow,
-                                            blurRadius: 12,
+                                  stream: player.stream.buffering,
+                                  builder: (context, buffSnap) {
+                                    final isBuffering = buffSnap.data ?? false;
+                                    return StreamBuilder<bool>(
+                                      stream: player.stream.playing,
+                                      builder: (context, snapshot) {
+                                        final isPlaying =
+                                            snapshot.data ?? false;
+                                        return Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: AppColors.brandRed
+                                                .withValues(alpha: 0.9),
+                                            boxShadow: const [
+                                              BoxShadow(
+                                                color: AppColors.brandRedGlow,
+                                                blurRadius: 12,
+                                              ),
+                                            ],
                                           ),
-                                        ],
-                                      ),
-                                      child: IconButton(
-                                        iconSize: 28,
-                                        icon: Icon(
-                                          isPlaying
-                                              ? Icons.pause_rounded
-                                              : Icons.play_arrow_rounded,
-                                          color: Colors.white,
-                                        ),
-                                        onPressed: () =>
-                                            miniPlayer.togglePlayPause(),
-                                      ),
+                                          child: isBuffering
+                                              ? const Center(
+                                                  child: SizedBox(
+                                                    width: 20,
+                                                    height: 20,
+                                                    child:
+                                                        CircularProgressIndicator(
+                                                          strokeWidth: 2.5,
+                                                          color: Colors.white,
+                                                        ),
+                                                  ),
+                                                )
+                                              : IconButton(
+                                                  iconSize: 28,
+                                                  icon: Icon(
+                                                    isPlaying
+                                                        ? Icons.pause_rounded
+                                                        : Icons
+                                                              .play_arrow_rounded,
+                                                    color: Colors.white,
+                                                  ),
+                                                  onPressed: () => miniPlayer
+                                                      .togglePlayPause(),
+                                                ),
+                                        );
+                                      },
                                     );
                                   },
                                 ),
@@ -179,21 +200,44 @@ class _FloatingMiniPlayerState extends State<FloatingMiniPlayer> {
                         left: 0,
                         right: 0,
                         child: StreamBuilder<Duration>(
-                          stream: player.stream.position,
-                          builder: (context, snapshot) {
-                            final pos = snapshot.data ?? Duration.zero;
-                            final dur = player.state.duration;
-                            final progress = dur.inMilliseconds > 0
-                                ? (pos.inMilliseconds / dur.inMilliseconds)
-                                      .clamp(0.0, 1.0)
-                                : 0.0;
-                            return LinearProgressIndicator(
-                              value: progress,
-                              backgroundColor: Colors.white12,
-                              valueColor: const AlwaysStoppedAnimation<Color>(
-                                AppColors.brandRed,
-                              ),
-                              minHeight: 3,
+                          stream: player.stream.buffer,
+                          builder: (context, bufSnap) {
+                            final buf = bufSnap.data ?? player.state.buffer;
+                            return StreamBuilder<Duration>(
+                              stream: player.stream.position,
+                              builder: (context, snapshot) {
+                                final pos = snapshot.data ?? Duration.zero;
+                                final dur = player.state.duration;
+                                final progress = dur.inMilliseconds > 0
+                                    ? (pos.inMilliseconds / dur.inMilliseconds)
+                                          .clamp(0.0, 1.0)
+                                    : 0.0;
+                                final bufProgress = dur.inMilliseconds > 0
+                                    ? (buf.inMilliseconds / dur.inMilliseconds)
+                                          .clamp(0.0, 1.0)
+                                    : 0.0;
+                                return Stack(
+                                  children: [
+                                    LinearProgressIndicator(
+                                      value: bufProgress,
+                                      backgroundColor: Colors.white12,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.white.withValues(alpha: 0.28),
+                                      ),
+                                      minHeight: 3,
+                                    ),
+                                    LinearProgressIndicator(
+                                      value: progress,
+                                      backgroundColor: Colors.transparent,
+                                      valueColor:
+                                          const AlwaysStoppedAnimation<Color>(
+                                            AppColors.brandRed,
+                                          ),
+                                      minHeight: 3,
+                                    ),
+                                  ],
+                                );
+                              },
                             );
                           },
                         ),

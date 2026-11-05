@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -60,10 +61,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   StreamSubscription? _errorSub;
   StreamSubscription? _bufferingSub;
   StreamSubscription? _positionSub;
+  StreamSubscription? _completedSub;
   Timer? _loadTimeoutTimer;
   Timer? _progressSaveTimer;
   bool _hasSeekedInitial = false;
   bool _isDocking = false;
+  bool _isDisposed = false;
   double _subtitleDelaySeconds = 0.0;
   bool _showNextEpisodePrompt = false;
   int _nextEpisodeCountdown = 12;
@@ -79,7 +82,11 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   @override
   void initState() {
     super.initState();
-    windowManager.addListener(this);
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      try {
+        windowManager.addListener(this);
+      } catch (_) {}
+    }
 
     if (widget.existingPlayer != null &&
         widget.existingVideoController != null) {
@@ -87,12 +94,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _videoController = widget.existingVideoController!;
       _isLoading = false;
     } else {
+      // Clean up previous docked mini-player to prevent dual MPV hardware decoding collision
+      try {
+        final miniPlayer = Provider.of<MiniPlayerProvider>(
+          context,
+          listen: false,
+        );
+        if (miniPlayer.isDocked) {
+          miniPlayer.close();
+        }
+      } catch (_) {}
+
       final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-      // High-performance streaming configuration with 300MB RAM buffer
+      // High-performance streaming configuration with sane 64MB RAM buffer
       _player = Player(
         configuration: const PlayerConfiguration(
           logLevel: MPVLogLevel.warn,
-          bufferSize: 300 * 1024 * 1024,
+          bufferSize: 64 * 1024 * 1024,
         ),
       );
       _videoController = VideoController(
@@ -109,15 +127,16 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _startHideTimer();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _focusNode.requestFocus();
+      if (mounted && !_isDisposed) {
+        _focusNode.requestFocus();
+      }
     });
   }
 
   void _initStreams() {
     _errorSub = _player.stream.error.listen((err) {
-      if (mounted &&
-          err.isNotEmpty &&
-          _player.state.position == Duration.zero) {
+      if (mounted && !_isDisposed && err.isNotEmpty) {
+        _loadTimeoutTimer?.cancel();
         setState(() {
           _errorMessage =
               'ارتباط با سرور پخش قطع شد. سرورهای محتوای ایرانی در صورت فعال بودن فیلترشکن ارتباط را مسدود می‌کنند. VPN را در حالت Bypass Iran قرار دهید یا ویدیو را در VLC باز کنید.';
@@ -127,10 +146,14 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() {
-          if (!buffering && _player.state.position > Duration.zero) {
+          if (buffering) {
+            _isLoading = true;
+            _showControls = true;
+          } else if (_player.state.position > Duration.zero) {
             _isLoading = false;
+            _startHideTimer();
           }
         });
       }
@@ -142,14 +165,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           widget.startPositionMs! > 0 &&
           _player.state.duration > Duration.zero) {
         _hasSeekedInitial = true;
-        _player.seek(Duration(milliseconds: widget.startPositionMs!));
+        try {
+          _player.seek(Duration(milliseconds: widget.startPositionMs!));
+        } catch (_) {}
       }
-      if (mounted && pos > Duration.zero && _isLoading) {
+      if (mounted && !_isDisposed && pos > Duration.zero && _isLoading) {
         setState(() {
           _isLoading = false;
           _errorMessage = null;
         });
         _loadTimeoutTimer?.cancel();
+        _startHideTimer();
       }
 
       // Auto-Next Episode Trigger (within last 15 seconds)
@@ -159,6 +185,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
         final remainingSec = (_player.state.duration - pos).inSeconds;
         if (remainingSec <= 15 && remainingSec > 0 && !_showNextEpisodePrompt) {
           _triggerNextEpisodeCountdown(remainingSec);
+        }
+      }
+    });
+
+    _completedSub = _player.stream.completed.listen((completed) {
+      if (mounted && !_isDisposed && completed) {
+        if (widget.nextEpisodeUrl != null && !_isAutoNextDismissed) {
+          _playNextEpisode();
+        } else {
+          setState(() {
+            _showControls = true;
+          });
         }
       }
     });
@@ -176,7 +214,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
     _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (!mounted) {
+      if (!mounted || _isDisposed) {
         timer.cancel();
         return;
       }
@@ -216,35 +254,74 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   Future<void> _startPlayback() async {
+    if (_isDisposed) return;
+
+    final trimmedUrl = widget.videoUrl.trim();
+    if (trimmedUrl.isEmpty) {
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'آدرس ویدیو یافت نشد یا نامعتبر است.';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
+    _loadTimeoutTimer?.cancel();
+
+    // Reset previous stream before attempting new playback
+    try {
+      await _player.stop();
+    } catch (_) {}
+
+    if (_isDisposed) return;
+
+    // Start 15-second watchdog timer BEFORE open() to catch network hangs
+    _loadTimeoutTimer = Timer(const Duration(seconds: 15), () async {
+      if (mounted &&
+          !_isDisposed &&
+          _isLoading &&
+          _player.state.position == Duration.zero) {
+        try {
+          await _player.stop();
+        } catch (_) {}
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _errorMessage =
+                'زمان پاسخگویی سرور پخش به پایان رسید. اگر فیلترشکن شما روشن است، لطفاً آن را روی Bypass Iran قرار دهید یا ویدیو را در VLC پخش کنید.';
+            _isLoading = false;
+          });
+        }
+      }
+    });
+
     try {
       final settings = Provider.of<AppSettingsProvider>(context, listen: false);
       final platform = _player.platform as dynamic;
-      // High-performance streaming & caching options for MPV
+      // High-performance streaming & sane caching options for MPV
       await platform?.setProperty('hwdec', settings.hwdec);
-      await platform?.setProperty('network-timeout', '30');
+      await platform?.setProperty('network-timeout', '15');
       await platform?.setProperty('tls-verify', 'no');
       await platform?.setProperty('ytdl', 'no');
       await platform?.setProperty('cache', 'yes');
-      await platform?.setProperty('cache-secs', '180');
+      await platform?.setProperty('cache-secs', '60');
       await platform?.setProperty(
         'demuxer-max-bytes',
-        '314572800',
-      ); // 300 MiB RAM buffer ahead
+        '67108864',
+      ); // 64 MiB RAM buffer ahead
       await platform?.setProperty(
         'demuxer-max-back-bytes',
-        '52428800',
-      ); // 50 MiB RAM buffer behind for instant rewind
+        '20971520',
+      ); // 20 MiB RAM buffer behind for instant rewind
       await platform?.setProperty(
         'demuxer-readahead-secs',
-        '180',
-      ); // 3 min readahead
-      await platform?.setProperty('demuxer-lavf-buffersize', '1048576');
-      await platform?.setProperty('demuxer-hysteresis-secs', '10');
+        '60',
+      ); // 1 min readahead
+      await platform?.setProperty('demuxer-lavf-buffersize', '524288');
+      await platform?.setProperty('demuxer-hysteresis-secs', '5');
       await platform?.setProperty('force-seekable', 'yes');
       await platform?.setProperty(
         'user-agent',
@@ -252,31 +329,36 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       );
     } catch (_) {}
 
-    await _player.open(
-      Media(
-        widget.videoUrl,
-        httpHeaders: {
-          'User-Agent':
-              'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-        },
-      ),
-    );
+    if (_isDisposed) return;
 
-    if (mounted) {
-      final settings = Provider.of<AppSettingsProvider>(context, listen: false);
-      _applySubtitleSettings(settings);
-    }
-
-    _loadTimeoutTimer?.cancel();
-    _loadTimeoutTimer = Timer(const Duration(seconds: 15), () {
-      if (mounted && _isLoading && _player.state.position == Duration.zero) {
+    try {
+      await _player.open(
+        Media(
+          trimmedUrl,
+          httpHeaders: {
+            'User-Agent':
+                'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          },
+        ),
+      );
+    } catch (e) {
+      if (mounted && !_isDisposed) {
+        _loadTimeoutTimer?.cancel();
+        try {
+          await _player.stop();
+        } catch (_) {}
         setState(() {
-          _errorMessage =
-              'زمان پاسخگویی سرور پخش به پایان رسید. اگر فیلترشکن شما روشن است، لطفاً آن را روی Bypass Iran قرار دهید یا ویدیو را در VLC پخش کنید.';
+          _errorMessage = 'عدم امکان پخش استریم: $e';
           _isLoading = false;
         });
       }
-    });
+      return;
+    }
+
+    if (mounted && !_isDisposed) {
+      final settings = Provider.of<AppSettingsProvider>(context, listen: false);
+      _applySubtitleSettings(settings);
+    }
   }
 
   void _applySubtitleSettings(AppSettingsProvider settings) {
@@ -294,7 +376,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _saveCurrentWatchProgress() {
-    if (widget.mediaItem == null || !mounted) return;
+    if (widget.mediaItem == null) return;
     try {
       final posMs = _player.state.position.inMilliseconds;
       final durMs = _player.state.duration.inMilliseconds;
@@ -312,7 +394,12 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
 
   @override
   void dispose() {
-    windowManager.removeListener(this);
+    _isDisposed = true;
+    if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+      try {
+        windowManager.removeListener(this);
+      } catch (_) {}
+    }
     _countdownTimer?.cancel();
     _seekRippleTimer?.cancel();
     _progressSaveTimer?.cancel();
@@ -322,16 +409,28 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _errorSub?.cancel();
     _bufferingSub?.cancel();
     _positionSub?.cancel();
+    _completedSub?.cancel();
     _focusNode.dispose();
     if (!_isDocking) {
-      _player.dispose();
+      _player
+          .stop()
+          .then((_) {
+            _player.dispose();
+          })
+          .catchError((_) {
+            _player.dispose();
+          });
     }
     super.dispose();
   }
 
   void _exitPlayer() async {
     if (_isFullscreen) {
-      await windowManager.setFullScreen(false);
+      try {
+        if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+          await windowManager.setFullScreen(false);
+        }
+      } catch (_) {}
     }
     if (mounted) {
       Navigator.of(context, rootNavigator: true).pop();
@@ -342,17 +441,23 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _isDocking = true;
     _saveCurrentWatchProgress();
     if (_isFullscreen) {
-      await windowManager.setFullScreen(false);
+      try {
+        if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+          await windowManager.setFullScreen(false);
+        }
+      } catch (_) {}
     }
     if (mounted) {
-      Provider.of<MiniPlayerProvider>(context, listen: false).dock(
-        player: _player,
-        videoController: _videoController,
-        title: widget.title,
-        videoUrl: widget.videoUrl,
-        mediaItem: widget.mediaItem,
-        episodeTitle: widget.episodeTitle,
-      );
+      try {
+        Provider.of<MiniPlayerProvider>(context, listen: false).dock(
+          player: _player,
+          videoController: _videoController,
+          title: widget.title,
+          videoUrl: widget.videoUrl,
+          mediaItem: widget.mediaItem,
+          episodeTitle: widget.episodeTitle,
+        );
+      } catch (_) {}
       Navigator.of(context, rootNavigator: true).pop();
     }
   }
@@ -360,7 +465,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   void _startHideTimer() {
     _hideTimer?.cancel();
     _hideTimer = Timer(const Duration(milliseconds: 2500), () {
-      if (mounted && _player.state.playing) {
+      if (mounted && _player.state.playing && !_isLoading) {
         setState(() {
           _showControls = false;
         });
@@ -378,6 +483,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _togglePlayPause() {
+    if (_isLoading) return;
     _player.playOrPause();
     _onUserInteraction();
   }
@@ -421,13 +527,17 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   }
 
   void _toggleFullscreen() async {
-    final isFull = await windowManager.isFullScreen();
-    await windowManager.setFullScreen(!isFull);
-    if (mounted) {
-      setState(() {
-        _isFullscreen = !isFull;
-      });
-    }
+    try {
+      if (Platform.isLinux || Platform.isWindows || Platform.isMacOS) {
+        final isFull = await windowManager.isFullScreen();
+        await windowManager.setFullScreen(!isFull);
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _isFullscreen = !isFull;
+          });
+        }
+      }
+    } catch (_) {}
     _onUserInteraction();
   }
 
@@ -511,767 +621,826 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
   Widget build(BuildContext context) {
     final settings = Provider.of<AppSettingsProvider>(context);
 
-    return Focus(
-      focusNode: _focusNode,
-      autofocus: true,
-      onKeyEvent: _handleKeyEvent,
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: MouseRegion(
-          onHover: (_) => _onUserInteraction(),
-          child: Stack(
-            children: [
-              // 1. Video rendering surface with dynamic aspect ratio fit
-              Center(
-                child: Video(
-                  controller: _videoController,
-                  fit: _videoFit,
-                  controls: NoVideoControls,
-                ),
-              ),
-
-              // 2. Gesture Zones (Double Tap Left / Right for ±10s Seek, Tap Center for Play/Pause)
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    // Left 35%: Seek -10s on double click
-                    Expanded(
-                      flex: 35,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _onUserInteraction,
-                        onDoubleTap: () => _seek(-settings.seekStepSeconds),
-                      ),
-                    ),
-                    // Center 30%: Toggle Play/Pause
-                    Expanded(
-                      flex: 30,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _togglePlayPause,
-                        onDoubleTap: _toggleFullscreen,
-                      ),
-                    ),
-                    // Right 35%: Seek +10s on double click
-                    Expanded(
-                      flex: 35,
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: _onUserInteraction,
-                        onDoubleTap: () => _seek(settings.seekStepSeconds),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // 3. Ripple Seek Indicator Overlay
-              if (_seekRippleDelta != 0)
-                Align(
-                  alignment: _seekRippleDelta > 0
-                      ? const Alignment(0.65, 0.0)
-                      : const Alignment(-0.65, 0.0),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.75),
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(
-                        color: AppColors.brandRed.withValues(alpha: 0.6),
-                        width: 1.5,
-                      ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: AppColors.brandRedGlow,
-                          blurRadius: 24,
-                          spreadRadius: 2,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _seekRippleDelta > 0
-                              ? Icons.forward_10_rounded
-                              : Icons.replay_10_rounded,
-                          color: Colors.white,
-                          size: 28,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          '${_seekRippleDelta.abs()} ثانیه ${_seekRippleDelta > 0 ? '+' : '-'}',
-                          style: GoogleFonts.vazirmatn(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          _exitPlayer();
+        }
+      },
+      child: Focus(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _handleKeyEvent,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: MouseRegion(
+            onHover: (_) => _onUserInteraction(),
+            child: Stack(
+              children: [
+                // 1. Video rendering surface with dynamic aspect ratio fit
+                Center(
+                  child: Video(
+                    controller: _videoController,
+                    fit: _videoFit,
+                    controls: NoVideoControls,
                   ),
                 ),
 
-              // 4. Controls Overlay
-              AnimatedOpacity(
-                opacity: _showControls ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 220),
-                child: IgnorePointer(
-                  ignoring: !_showControls,
-                  child: Directionality(
-                    textDirection: TextDirection.ltr,
-                    child: Stack(
-                      children: [
-                        // Top & Bottom gradient shadows
-                        Positioned(
-                          top: 0,
-                          left: 0,
-                          right: 0,
-                          height: 120,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [Color(0xB8000000), Colors.transparent],
+                // 2. Gesture Zones (Double Tap Left / Right for ±10s Seek, Tap Center for Play/Pause)
+                Positioned.fill(
+                  child: Row(
+                    children: [
+                      // Left 35%: Seek -10s on double click
+                      Expanded(
+                        flex: 35,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _onUserInteraction,
+                          onDoubleTap: () => _seek(-settings.seekStepSeconds),
+                        ),
+                      ),
+                      // Center 30%: Toggle Play/Pause
+                      Expanded(
+                        flex: 30,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _togglePlayPause,
+                          onDoubleTap: _toggleFullscreen,
+                        ),
+                      ),
+                      // Right 35%: Seek +10s on double click
+                      Expanded(
+                        flex: 35,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.translucent,
+                          onTap: _onUserInteraction,
+                          onDoubleTap: () => _seek(settings.seekStepSeconds),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // 3. Ripple Seek Indicator Overlay
+                if (_seekRippleDelta != 0)
+                  Align(
+                    alignment: _seekRippleDelta > 0
+                        ? const Alignment(0.65, 0.0)
+                        : const Alignment(-0.65, 0.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 20,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.75),
+                        borderRadius: BorderRadius.circular(30),
+                        border: Border.all(
+                          color: AppColors.brandRed.withValues(alpha: 0.6),
+                          width: 1.5,
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: AppColors.brandRedGlow,
+                            blurRadius: 24,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _seekRippleDelta > 0
+                                ? Icons.forward_10_rounded
+                                : Icons.replay_10_rounded,
+                            color: Colors.white,
+                            size: 28,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '${_seekRippleDelta.abs()} ثانیه ${_seekRippleDelta > 0 ? '+' : '-'}',
+                            style: GoogleFonts.vazirmatn(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                // 4. Controls Overlay
+                AnimatedOpacity(
+                  opacity: _showControls ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 220),
+                  child: IgnorePointer(
+                    ignoring: !_showControls,
+                    child: Directionality(
+                      textDirection: TextDirection.ltr,
+                      child: Stack(
+                        children: [
+                          // Top & Bottom gradient shadows
+                          Positioned(
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            height: 120,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [
+                                    Color(0xB8000000),
+                                    Colors.transparent,
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        Positioned(
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          height: 150,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.bottomCenter,
-                                end: Alignment.topCenter,
-                                colors: [Color(0xD9000000), Colors.transparent],
+                          Positioned(
+                            bottom: 0,
+                            left: 0,
+                            right: 0,
+                            height: 150,
+                            child: Container(
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    Color(0xD9000000),
+                                    Colors.transparent,
+                                  ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
 
-                        // Top Bar: Back button, Title & Episode badge (RTL)
-                        Positioned(
-                          top: 24,
-                          left: 24,
-                          right: 24,
-                          child: Directionality(
-                            textDirection: TextDirection.rtl,
-                            child: Row(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(
-                                    Icons.arrow_forward_rounded,
-                                    color: Colors.white,
-                                    size: 26,
-                                  ),
-                                  tooltip: 'بازگشت (Esc)',
-                                  onPressed: _exitPlayer,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        widget.title,
-                                        style: GoogleFonts.vazirmatn(
-                                          color: Colors.white,
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                          shadows: const [
-                                            Shadow(
-                                              color: Colors.black,
-                                              blurRadius: 8,
-                                            ),
-                                          ],
-                                        ),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      if (widget.episodeTitle != null) ...[
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          widget.episodeTitle!,
-                                          style: GoogleFonts.vazirmatn(
-                                            color: Colors.white70,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-
-                        // Center Controls (Netflix Cinematic Style)
-                        Center(
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                iconSize: 42,
-                                icon: const Icon(
-                                  Icons.replay_10_rounded,
-                                  color: Colors.white70,
-                                ),
-                                tooltip: '۱۰ ثانیه قبل (J / ←)',
-                                onPressed: () =>
-                                    _seek(-settings.seekStepSeconds),
-                              ),
-                              const SizedBox(width: 32),
-                              StreamBuilder<bool>(
-                                stream: _player.stream.playing,
-                                builder: (context, snapshot) {
-                                  final isPlaying = snapshot.data ?? false;
-                                  return Container(
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: AppColors.brandRed.withValues(
-                                        alpha: 0.95,
-                                      ),
-                                      boxShadow: const [
-                                        BoxShadow(
-                                          color: AppColors.brandRedGlow,
-                                          blurRadius: 20,
-                                          spreadRadius: 2,
-                                        ),
-                                      ],
-                                    ),
-                                    child: IconButton(
-                                      iconSize: 52,
-                                      icon: Icon(
-                                        isPlaying
-                                            ? Icons.pause_rounded
-                                            : Icons.play_arrow_rounded,
-                                        color: Colors.white,
-                                      ),
-                                      onPressed: _togglePlayPause,
-                                    ),
-                                  );
-                                },
-                              ),
-                              const SizedBox(width: 32),
-                              IconButton(
-                                iconSize: 42,
-                                icon: const Icon(
-                                  Icons.forward_10_rounded,
-                                  color: Colors.white70,
-                                ),
-                                tooltip: '۱۰ ثانیه بعد (L / →)',
-                                onPressed: () =>
-                                    _seek(settings.seekStepSeconds),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Bottom Bar: Precision Scrubber, Time toggle, Volume Slider, Speed Badge
-                        Positioned(
-                          bottom: 16,
-                          left: 24,
-                          right: 24,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Precision Scrubbing Slider
-                              StreamBuilder<Duration>(
-                                stream: _player.stream.position,
-                                builder: (context, posSnap) {
-                                  final pos = posSnap.data ?? Duration.zero;
-                                  final dur = _player.state.duration;
-                                  final maxMs = dur.inMilliseconds.toDouble();
-                                  final curMs = pos.inMilliseconds
-                                      .toDouble()
-                                      .clamp(0.0, maxMs > 0 ? maxMs : 1.0);
-
-                                  return SliderTheme(
-                                    data: SliderTheme.of(context).copyWith(
-                                      trackHeight: 4,
-                                      thumbShape: const RoundSliderThumbShape(
-                                        enabledThumbRadius: 6,
-                                      ),
-                                      overlayShape:
-                                          const RoundSliderOverlayShape(
-                                            overlayRadius: 12,
-                                          ),
-                                      activeTrackColor: AppColors.brandRed,
-                                      inactiveTrackColor: Colors.white24,
-                                      thumbColor: AppColors.brandRed,
-                                    ),
-                                    child: Slider(
-                                      min: 0.0,
-                                      max: maxMs > 0 ? maxMs : 1.0,
-                                      value: curMs,
-                                      onChanged: (val) {
-                                        _onUserInteraction();
-                                        _player.seek(
-                                          Duration(milliseconds: val.toInt()),
-                                        );
-                                      },
-                                    ),
-                                  );
-                                },
-                              ),
-
-                              // Bottom Details Bar
-                              Row(
+                          // Top Bar: Back button, Title & Episode badge (RTL)
+                          Positioned(
+                            top: 24,
+                            left: 24,
+                            right: 24,
+                            child: Directionality(
+                              textDirection: TextDirection.rtl,
+                              child: Row(
                                 children: [
-                                  // Time Indicator (Clickable to switch between elapsed and remaining)
-                                  StreamBuilder<Duration>(
-                                    stream: _player.stream.position,
-                                    builder: (context, snapshot) {
-                                      final pos =
-                                          snapshot.data ?? Duration.zero;
-                                      final dur = _player.state.duration;
-                                      final remaining = dur - pos;
-                                      return InkWell(
-                                        onTap: () {
-                                          setState(() {
-                                            _showRemainingTime =
-                                                !_showRemainingTime;
-                                          });
-                                        },
-                                        borderRadius: BorderRadius.circular(4),
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 2,
-                                          ),
-                                          child: Text(
-                                            _showRemainingTime
-                                                ? '-${_formatDuration(remaining < Duration.zero ? Duration.zero : remaining)} / ${_formatDuration(dur)}'
-                                                : '${_formatDuration(pos)} / ${_formatDuration(dur)}',
-                                            style: GoogleFonts.spaceMono(
-                                              color: Colors.white,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ),
-                                      );
-                                    },
+                                  IconButton(
+                                    icon: const Icon(
+                                      Icons.arrow_forward_rounded,
+                                      color: Colors.white,
+                                      size: 26,
+                                    ),
+                                    tooltip: 'بازگشت (Esc)',
+                                    onPressed: _exitPlayer,
                                   ),
-                                  const SizedBox(width: 8),
-
-                                  // Volume Control
-                                  StreamBuilder<double>(
-                                    stream: _player.stream.volume,
-                                    builder: (context, snapshot) {
-                                      final vol = snapshot.data ?? 100.0;
-                                      return Row(
-                                        children: [
-                                          IconButton(
-                                            icon: Icon(
-                                              vol == 0
-                                                  ? Icons.volume_off_rounded
-                                                  : vol < 50
-                                                  ? Icons.volume_down_rounded
-                                                  : Icons.volume_up_rounded,
-                                              color: Colors.white,
-                                              size: 20,
-                                            ),
-                                            tooltip: 'بی‌صدا (M)',
-                                            onPressed: _toggleMute,
-                                          ),
-                                          SizedBox(
-                                            width: 80,
-                                            child: SliderTheme(
-                                              data: SliderTheme.of(context)
-                                                  .copyWith(
-                                                    trackHeight: 3,
-                                                    thumbShape:
-                                                        const RoundSliderThumbShape(
-                                                          enabledThumbRadius: 5,
-                                                        ),
-                                                    activeTrackColor:
-                                                        Colors.white,
-                                                    inactiveTrackColor:
-                                                        Colors.white24,
-                                                    thumbColor: Colors.white,
-                                                  ),
-                                              child: Slider(
-                                                min: 0,
-                                                max: 100,
-                                                value: vol,
-                                                onChanged: (v) {
-                                                  _onUserInteraction();
-                                                  _player.setVolume(v);
-                                                },
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Text(
+                                          widget.title,
+                                          style: GoogleFonts.vazirmatn(
+                                            color: Colors.white,
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                            shadows: const [
+                                              Shadow(
+                                                color: Colors.black,
+                                                blurRadius: 8,
                                               ),
+                                            ],
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        if (widget.episodeTitle != null) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            widget.episodeTitle!,
+                                            style: GoogleFonts.vazirmatn(
+                                              color: Colors.white70,
+                                              fontSize: 12,
                                             ),
                                           ),
                                         ],
-                                      );
-                                    },
-                                  ),
-
-                                  const Spacer(),
-
-                                  // Action Controls Pill (Speed, Aspect ratio, Audio & Subtitles, PiP, VLC, Fullscreen)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 6,
-                                      vertical: 3,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: const Color(
-                                        0xFF13151F,
-                                      ).withValues(alpha: 0.8),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: Colors.white12,
-                                        width: 0.8,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        // Playback Speed Button
-                                        PopupMenuButton<double>(
-                                          initialValue: _playbackSpeed,
-                                          tooltip: 'سرعت پخش',
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              border: Border.all(
-                                                color: Colors.white30,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(6),
-                                            ),
-                                            child: Text(
-                                              '${_playbackSpeed}x',
-                                              style: GoogleFonts.spaceMono(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                              ),
-                                            ),
-                                          ),
-                                          itemBuilder: (context) =>
-                                              [
-                                                0.5,
-                                                0.75,
-                                                1.0,
-                                                1.25,
-                                                1.5,
-                                                2.0,
-                                              ].map((speed) {
-                                                return PopupMenuItem<double>(
-                                                  value: speed,
-                                                  child: Text('${speed}x'),
-                                                );
-                                              }).toList(),
-                                          onSelected: (speed) {
-                                            setState(() {
-                                              _playbackSpeed = speed;
-                                            });
-                                            _player.setRate(speed);
-                                            _onUserInteraction();
-                                          },
-                                        ),
-                                        const SizedBox(width: 4),
-
-                                        // Aspect Ratio Toggle
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.aspect_ratio_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          tooltip:
-                                              'نسبت تصویر: $_aspectRatioLabel',
-                                          onPressed: _cycleAspectRatio,
-                                        ),
-
-                                        // Audio & Subtitles
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.subtitles_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          tooltip: 'زیرنویس و صدا',
-                                          onPressed: _showTrackSelectionDialog,
-                                        ),
-
-                                        // PiP
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons
-                                                .picture_in_picture_alt_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          tooltip: 'تصویر در تصویر (PiP)',
-                                          onPressed: _dockToMiniPlayer,
-                                        ),
-
-                                        // VLC
-                                        IconButton(
-                                          icon: const Icon(
-                                            Icons.tv_rounded,
-                                            color: Colors.white,
-                                            size: 20,
-                                          ),
-                                          tooltip: 'پخش با VLC',
-                                          onPressed: () =>
-                                              VLCLauncher.launchInVLC(
-                                                widget.videoUrl,
-                                              ),
-                                        ),
-
-                                        // Fullscreen
-                                        IconButton(
-                                          icon: Icon(
-                                            _isFullscreen
-                                                ? Icons.fullscreen_exit_rounded
-                                                : Icons.fullscreen_rounded,
-                                            color: Colors.white,
-                                            size: 22,
-                                          ),
-                                          tooltip: 'تمام‌صفحه (F)',
-                                          onPressed: _toggleFullscreen,
-                                        ),
                                       ],
                                     ),
                                   ),
                                 ],
                               ),
-                            ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
 
-              // Auto-Next Episode Floating Banner
-              if (_showNextEpisodePrompt && widget.nextEpisodeUrl != null)
-                Positioned(
-                  bottom: 110,
-                  left: 32,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF13151F).withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: AppColors.brandRed.withValues(alpha: 0.6),
-                        width: 1.2,
+                          // Center Controls (Netflix Cinematic Style)
+                          Center(
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                IconButton(
+                                  iconSize: 42,
+                                  icon: const Icon(
+                                    Icons.replay_10_rounded,
+                                    color: Colors.white70,
+                                  ),
+                                  tooltip: '۱۰ ثانیه قبل (J / ←)',
+                                  onPressed: () =>
+                                      _seek(-settings.seekStepSeconds),
+                                ),
+                                const SizedBox(width: 32),
+                                StreamBuilder<bool>(
+                                  stream: _player.stream.playing,
+                                  builder: (context, snapshot) {
+                                    final isPlaying = snapshot.data ?? false;
+                                    return Container(
+                                      width: 68,
+                                      height: 68,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: AppColors.brandRed.withValues(
+                                          alpha: 0.95,
+                                        ),
+                                        boxShadow: const [
+                                          BoxShadow(
+                                            color: AppColors.brandRedGlow,
+                                            blurRadius: 20,
+                                            spreadRadius: 2,
+                                          ),
+                                        ],
+                                      ),
+                                      child: _isLoading && _errorMessage == null
+                                          ? const Center(
+                                              child: SizedBox(
+                                                width: 32,
+                                                height: 32,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 3,
+                                                      color: Colors.white,
+                                                    ),
+                                              ),
+                                            )
+                                          : IconButton(
+                                              iconSize: 46,
+                                              icon: Icon(
+                                                isPlaying
+                                                    ? Icons.pause_rounded
+                                                    : Icons.play_arrow_rounded,
+                                                color: Colors.white,
+                                              ),
+                                              onPressed: _togglePlayPause,
+                                            ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 32),
+                                IconButton(
+                                  iconSize: 42,
+                                  icon: const Icon(
+                                    Icons.forward_10_rounded,
+                                    color: Colors.white70,
+                                  ),
+                                  tooltip: '۱۰ ثانیه بعد (L / →)',
+                                  onPressed: () =>
+                                      _seek(settings.seekStepSeconds),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Bottom Bar: Precision Scrubber, Time toggle, Volume Slider, Speed Badge
+                          Positioned(
+                            bottom: 16,
+                            left: 24,
+                            right: 24,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                // Precision Scrubbing Slider with Buffered Track
+                                StreamBuilder<Duration>(
+                                  stream: _player.stream.buffer,
+                                  builder: (context, bufSnap) {
+                                    final buffer =
+                                        bufSnap.data ?? _player.state.buffer;
+                                    return StreamBuilder<Duration>(
+                                      stream: _player.stream.position,
+                                      builder: (context, posSnap) {
+                                        final pos =
+                                            posSnap.data ?? Duration.zero;
+                                        final dur = _player.state.duration;
+                                        final maxMs = dur.inMilliseconds
+                                            .toDouble();
+                                        final curMs = pos.inMilliseconds
+                                            .toDouble()
+                                            .clamp(
+                                              0.0,
+                                              maxMs > 0 ? maxMs : 1.0,
+                                            );
+                                        final bufMs = buffer.inMilliseconds
+                                            .toDouble()
+                                            .clamp(
+                                              0.0,
+                                              maxMs > 0 ? maxMs : 1.0,
+                                            );
+
+                                        return SliderTheme(
+                                          data: SliderTheme.of(context).copyWith(
+                                            trackHeight: 4,
+                                            thumbShape:
+                                                const RoundSliderThumbShape(
+                                                  enabledThumbRadius: 6,
+                                                ),
+                                            overlayShape:
+                                                const RoundSliderOverlayShape(
+                                                  overlayRadius: 12,
+                                                ),
+                                            activeTrackColor:
+                                                AppColors.brandRed,
+                                            secondaryActiveTrackColor: Colors
+                                                .white
+                                                .withValues(alpha: 0.38),
+                                            inactiveTrackColor: Colors.white24,
+                                            thumbColor: AppColors.brandRed,
+                                          ),
+                                          child: Slider(
+                                            min: 0.0,
+                                            max: maxMs > 0 ? maxMs : 1.0,
+                                            value: curMs,
+                                            secondaryTrackValue: maxMs > 0
+                                                ? bufMs
+                                                : null,
+                                            onChanged: (val) {
+                                              _onUserInteraction();
+                                              _player.seek(
+                                                Duration(
+                                                  milliseconds: val.toInt(),
+                                                ),
+                                              );
+                                            },
+                                          ),
+                                        );
+                                      },
+                                    );
+                                  },
+                                ),
+
+                                // Bottom Details Bar
+                                Row(
+                                  children: [
+                                    // Time Indicator (Clickable to switch between elapsed and remaining)
+                                    StreamBuilder<Duration>(
+                                      stream: _player.stream.position,
+                                      builder: (context, snapshot) {
+                                        final pos =
+                                            snapshot.data ?? Duration.zero;
+                                        final dur = _player.state.duration;
+                                        final remaining = dur - pos;
+                                        return InkWell(
+                                          onTap: () {
+                                            setState(() {
+                                              _showRemainingTime =
+                                                  !_showRemainingTime;
+                                            });
+                                          },
+                                          borderRadius: BorderRadius.circular(
+                                            4,
+                                          ),
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 4,
+                                              vertical: 2,
+                                            ),
+                                            child: Text(
+                                              _showRemainingTime
+                                                  ? '-${_formatDuration(remaining < Duration.zero ? Duration.zero : remaining)} / ${_formatDuration(dur)}'
+                                                  : '${_formatDuration(pos)} / ${_formatDuration(dur)}',
+                                              style: GoogleFonts.spaceMono(
+                                                color: Colors.white,
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+
+                                    // Volume Control
+                                    StreamBuilder<double>(
+                                      stream: _player.stream.volume,
+                                      builder: (context, snapshot) {
+                                        final vol = snapshot.data ?? 100.0;
+                                        return Row(
+                                          children: [
+                                            IconButton(
+                                              icon: Icon(
+                                                vol == 0
+                                                    ? Icons.volume_off_rounded
+                                                    : vol < 50
+                                                    ? Icons.volume_down_rounded
+                                                    : Icons.volume_up_rounded,
+                                                color: Colors.white,
+                                                size: 20,
+                                              ),
+                                              tooltip: 'بی‌صدا (M)',
+                                              onPressed: _toggleMute,
+                                            ),
+                                            SizedBox(
+                                              width: 80,
+                                              child: SliderTheme(
+                                                data: SliderTheme.of(context)
+                                                    .copyWith(
+                                                      trackHeight: 3,
+                                                      thumbShape:
+                                                          const RoundSliderThumbShape(
+                                                            enabledThumbRadius:
+                                                                5,
+                                                          ),
+                                                      activeTrackColor:
+                                                          Colors.white,
+                                                      inactiveTrackColor:
+                                                          Colors.white24,
+                                                      thumbColor: Colors.white,
+                                                    ),
+                                                child: Slider(
+                                                  min: 0,
+                                                  max: 100,
+                                                  value: vol,
+                                                  onChanged: (v) {
+                                                    _onUserInteraction();
+                                                    _player.setVolume(v);
+                                                  },
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        );
+                                      },
+                                    ),
+
+                                    const Spacer(),
+
+                                    // Action Controls Pill (Speed, Aspect ratio, Audio & Subtitles, PiP, VLC, Fullscreen)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 6,
+                                        vertical: 3,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(
+                                          0xFF13151F,
+                                        ).withValues(alpha: 0.8),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: Colors.white12,
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          // Playback Speed Button
+                                          PopupMenuButton<double>(
+                                            initialValue: _playbackSpeed,
+                                            tooltip: 'سرعت پخش',
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                border: Border.all(
+                                                  color: Colors.white30,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                '${_playbackSpeed}x',
+                                                style: GoogleFonts.spaceMono(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                            itemBuilder: (context) =>
+                                                [
+                                                  0.5,
+                                                  0.75,
+                                                  1.0,
+                                                  1.25,
+                                                  1.5,
+                                                  2.0,
+                                                ].map((speed) {
+                                                  return PopupMenuItem<double>(
+                                                    value: speed,
+                                                    child: Text('${speed}x'),
+                                                  );
+                                                }).toList(),
+                                            onSelected: (speed) {
+                                              setState(() {
+                                                _playbackSpeed = speed;
+                                              });
+                                              _player.setRate(speed);
+                                              _onUserInteraction();
+                                            },
+                                          ),
+                                          const SizedBox(width: 4),
+
+                                          // Aspect Ratio Toggle
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.aspect_ratio_rounded,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                            tooltip:
+                                                'نسبت تصویر: $_aspectRatioLabel',
+                                            onPressed: _cycleAspectRatio,
+                                          ),
+
+                                          // Audio & Subtitles
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.subtitles_rounded,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                            tooltip: 'زیرنویس و صدا',
+                                            onPressed:
+                                                _showTrackSelectionDialog,
+                                          ),
+
+                                          // PiP
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons
+                                                  .picture_in_picture_alt_rounded,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                            tooltip: 'تصویر در تصویر (PiP)',
+                                            onPressed: _dockToMiniPlayer,
+                                          ),
+
+                                          // VLC
+                                          IconButton(
+                                            icon: const Icon(
+                                              Icons.tv_rounded,
+                                              color: Colors.white,
+                                              size: 20,
+                                            ),
+                                            tooltip: 'پخش با VLC',
+                                            onPressed: () =>
+                                                VLCLauncher.launchInVLC(
+                                                  widget.videoUrl,
+                                                ),
+                                          ),
+
+                                          // Fullscreen
+                                          IconButton(
+                                            icon: Icon(
+                                              _isFullscreen
+                                                  ? Icons
+                                                        .fullscreen_exit_rounded
+                                                  : Icons.fullscreen_rounded,
+                                              color: Colors.white,
+                                              size: 22,
+                                            ),
+                                            tooltip: 'تمام‌صفحه (F)',
+                                            onPressed: _toggleFullscreen,
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black87,
-                          blurRadius: 20,
-                          spreadRadius: 4,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: const BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: AppColors.brandRed,
-                          ),
-                          child: Center(
-                            child: Text(
-                              '$_nextEpisodeCountdown',
-                              style: GoogleFonts.spaceMono(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 14),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'پخش خودکار قسمت بعد...',
-                              style: GoogleFonts.vazirmatn(
-                                color: AppColors.textMuted,
-                                fontSize: 11,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              widget.nextEpisodeTitle ?? 'قسمت بعدی',
-                              style: GoogleFonts.vazirmatn(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 16),
-                        ElevatedButton(
-                          onPressed: _playNextEpisode,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.brandRed,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 8,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child: Text(
-                            'پخش اکنون',
-                            style: GoogleFonts.vazirmatn(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(
-                            Icons.close_rounded,
-                            size: 20,
-                            color: Colors.white70,
-                          ),
-                          tooltip: 'لغو پخش خودکار',
-                          onPressed: _cancelAutoNext,
-                        ),
-                      ],
                     ),
                   ),
                 ),
 
-              // Loading Spinner
-              if (_isLoading && _errorMessage == null)
-                const Center(
-                  child: CircularProgressIndicator(color: Color(0xFFE11D48)),
-                ),
-
-              // Error Overlay
-              if (_errorMessage != null)
-                Center(
-                  child: Container(
-                    constraints: const BoxConstraints(maxWidth: 480),
-                    margin: const EdgeInsets.symmetric(horizontal: 24),
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF161822).withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: Colors.white12),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Colors.black87,
-                          blurRadius: 24,
-                          spreadRadius: 4,
+                // Auto-Next Episode Floating Banner
+                if (_showNextEpisodePrompt && widget.nextEpisodeUrl != null)
+                  Positioned(
+                    bottom: 110,
+                    left: 32,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 14,
+                      ),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF13151F).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppColors.brandRed.withValues(alpha: 0.6),
+                          width: 1.2,
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.wifi_off_rounded,
-                          color: Color(0xFFE11D48),
-                          size: 52,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          'عدم امکان پخش استریم',
-                          style: GoogleFonts.vazirmatn(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black87,
+                            blurRadius: 20,
+                            spreadRadius: 4,
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                        Text(
-                          _errorMessage!,
-                          textAlign: TextAlign.center,
-                          style: GoogleFonts.vazirmatn(
-                            color: Colors.white70,
-                            fontSize: 13,
-                            height: 1.6,
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: const BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: AppColors.brandRed,
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$_nextEpisodeCountdown',
+                                style: GoogleFonts.spaceMono(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 15,
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 24),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            ElevatedButton.icon(
-                              icon: const Icon(Icons.tv_rounded, size: 20),
-                              label: Text(
-                                'پخش در VLC',
+                          const SizedBox(width: 14),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'پخش خودکار قسمت بعد...',
                                 style: GoogleFonts.vazirmatn(
+                                  color: AppColors.textMuted,
+                                  fontSize: 11,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                widget.nextEpisodeTitle ?? 'قسمت بعدی',
+                                style: GoogleFonts.vazirmatn(
+                                  color: Colors.white,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFE11D48),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 18,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
+                            ],
+                          ),
+                          const SizedBox(width: 16),
+                          ElevatedButton(
+                            onPressed: _playNextEpisode,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.brandRed,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 8,
                               ),
-                              onPressed: () =>
-                                  VLCLauncher.launchInVLC(widget.videoUrl),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
                             ),
-                            const SizedBox(width: 12),
-                            OutlinedButton.icon(
-                              icon: const Icon(Icons.refresh_rounded, size: 20),
-                              label: Text(
-                                'تلاش دوباره',
-                                style: GoogleFonts.vazirmatn(),
+                            child: Text(
+                              'پخش اکنون',
+                              style: GoogleFonts.vazirmatn(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12,
                               ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white70,
-                                side: const BorderSide(color: Colors.white24),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                              ),
-                              onPressed: _startPlayback,
                             ),
-                          ],
-                        ),
-                      ],
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(
+                              Icons.close_rounded,
+                              size: 20,
+                              color: Colors.white70,
+                            ),
+                            tooltip: 'لغو پخش خودکار',
+                            onPressed: _cancelAutoNext,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-            ],
+
+                // Error Overlay
+                if (_errorMessage != null)
+                  Center(
+                    child: Container(
+                      constraints: const BoxConstraints(maxWidth: 480),
+                      margin: const EdgeInsets.symmetric(horizontal: 24),
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161822).withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white12),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Colors.black87,
+                            blurRadius: 24,
+                            spreadRadius: 4,
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.wifi_off_rounded,
+                            color: Color(0xFFE11D48),
+                            size: 52,
+                          ),
+                          const SizedBox(height: 16),
+                          Text(
+                            'عدم امکان پخش استریم',
+                            style: GoogleFonts.vazirmatn(
+                              color: Colors.white,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            _errorMessage!,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.vazirmatn(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              height: 1.6,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              ElevatedButton.icon(
+                                icon: const Icon(Icons.tv_rounded, size: 20),
+                                label: Text(
+                                  'پخش در VLC',
+                                  style: GoogleFonts.vazirmatn(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFFE11D48),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 18,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: () =>
+                                    VLCLauncher.launchInVLC(widget.videoUrl),
+                              ),
+                              const SizedBox(width: 12),
+                              OutlinedButton.icon(
+                                icon: const Icon(
+                                  Icons.refresh_rounded,
+                                  size: 20,
+                                ),
+                                label: Text(
+                                  'تلاش دوباره',
+                                  style: GoogleFonts.vazirmatn(),
+                                ),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: Colors.white70,
+                                  side: const BorderSide(color: Colors.white24),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 16,
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: _startPlayback,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1431,17 +1600,27 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                         ),
                         TextButton.icon(
                           onPressed: () async {
-                            final result = await FilePicker.platform.pickFiles(
-                              type: FileType.custom,
-                              allowedExtensions: ['srt', 'vtt', 'ass', 'sub'],
-                            );
-                            if (result != null &&
-                                result.files.single.path != null) {
-                              final filePath = result.files.single.path!;
-                              await _player.setSubtitleTrack(
-                                SubtitleTrack.uri(filePath),
-                              );
-                              if (ctx.mounted) Navigator.pop(ctx);
+                            try {
+                              final result = await FilePicker.platform
+                                  .pickFiles(
+                                    type: FileType.custom,
+                                    allowedExtensions: [
+                                      'srt',
+                                      'vtt',
+                                      'ass',
+                                      'sub',
+                                    ],
+                                  );
+                              if (result != null &&
+                                  result.files.single.path != null) {
+                                final filePath = result.files.single.path!;
+                                await _player.setSubtitleTrack(
+                                  SubtitleTrack.uri(filePath),
+                                );
+                                if (ctx.mounted) Navigator.pop(ctx);
+                              }
+                            } catch (e) {
+                              debugPrint('Error picking subtitle: $e');
                             }
                           },
                           icon: const Icon(Icons.folder_open_rounded, size: 16),
@@ -1479,7 +1658,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           backgroundColor: Colors.white12,
                           onSelected: (selected) {
                             if (selected) {
-                              _player.setSubtitleTrack(SubtitleTrack.no());
+                              try {
+                                _player.setSubtitleTrack(SubtitleTrack.no());
+                              } catch (_) {}
                             }
                             Navigator.pop(ctx);
                           },
@@ -1501,7 +1682,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                             backgroundColor: Colors.white12,
                             onSelected: (selected) {
                               if (selected) {
-                                _player.setSubtitleTrack(sub);
+                                try {
+                                  _player.setSubtitleTrack(sub);
+                                } catch (_) {}
                               }
                               Navigator.pop(ctx);
                             },
@@ -1542,7 +1725,9 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                             backgroundColor: Colors.white12,
                             onSelected: (selected) {
                               if (selected) {
-                                _player.setAudioTrack(aud);
+                                try {
+                                  _player.setAudioTrack(aud);
+                                } catch (_) {}
                               }
                               Navigator.pop(ctx);
                             },

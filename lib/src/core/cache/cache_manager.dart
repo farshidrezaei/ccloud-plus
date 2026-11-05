@@ -97,8 +97,18 @@ class CacheManager {
   /// Check if entry exists in cache (fresh or stale)
   bool has(String key) => _entries.containsKey(key);
 
+  static const int _maxMemoryEntries = 300;
+
   /// Store item in cache with TTL
   void set(String key, String data, {Duration ttl = defaultTtl}) {
+    if (_entries.length >= _maxMemoryEntries) {
+      // Evict oldest entries to prevent RAM bloat
+      final keysToRemove = _entries.keys.take(50).toList();
+      for (final k in keysToRemove) {
+        _entries.remove(k);
+      }
+    }
+
     _entries[key] = CacheEntry(
       data: data,
       cachedAtMs: DateTime.now().millisecondsSinceEpoch,

@@ -161,15 +161,18 @@ abstract final class UpdateService {
       final saveFile = File('${tempDir.path}/$fileName');
       final sink = saveFile.openWrite();
 
-      await for (final chunk in response.stream) {
-        sink.add(chunk);
-        receivedBytes += chunk.length;
-        if (totalBytes > 0) {
-          onProgress(receivedBytes / totalBytes, receivedBytes, totalBytes);
+      try {
+        await for (final chunk in response.stream) {
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          if (totalBytes > 0) {
+            onProgress(receivedBytes / totalBytes, receivedBytes, totalBytes);
+          }
         }
+        await sink.flush();
+      } finally {
+        await sink.close();
       }
-      await sink.flush();
-      await sink.close();
 
       // Platform specific installation
       if (Platform.isLinux) {
@@ -203,8 +206,8 @@ fi
 
         return 'بروزرسانی با موفقیت دانلود و در سیستم شما جایگزین شد! لطفاً روی دکمه «راه‌اندازی مجدد برنامه» کلیک کنید.';
       } else if (Platform.isWindows) {
-        // Run Windows installer
-        await Process.start(saveFile.path, []);
+        // Run Windows installer detached
+        await Process.start(saveFile.path, [], mode: ProcessStartMode.detached);
         return 'نصاب نسخه جدید اجرا شد. برنامه در حال بسته‌شدن است...';
       } else if (Platform.isMacOS) {
         // Mount DMG

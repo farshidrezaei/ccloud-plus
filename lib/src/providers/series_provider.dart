@@ -76,20 +76,29 @@ class SeriesProvider with ChangeNotifier {
           .where((series) => !containsFarsiOrArabic(series.title))
           .toList();
 
-      if (filteredSeries.isEmpty && newSeries.isNotEmpty) {
-        // If all series were filtered out, try to load more
+      var currentNewSeries = newSeries;
+      var currentFiltered = filteredSeries;
+      int emptyAttempts = 0;
+
+      while (currentFiltered.isEmpty &&
+          currentNewSeries.isNotEmpty &&
+          emptyAttempts < 5) {
         _currentPage++;
-        _isLoading = false;
-        notifyListeners();
-        // Load more series recursively
-        await loadSeries();
-        return;
+        emptyAttempts++;
+        currentNewSeries = await _seriesRepository.getSeries(
+          page: _currentPage,
+          genreId: _selectedGenreId,
+          filterType: _selectedFilter,
+        );
+        currentFiltered = currentNewSeries
+            .where((series) => !containsFarsiOrArabic(series.title))
+            .toList();
       }
 
-      if (newSeries.isEmpty) {
+      if (currentNewSeries.isEmpty) {
         _hasMore = false;
       } else {
-        _series.addAll(filteredSeries);
+        _series.addAll(currentFiltered);
         _currentPage++;
       }
     } catch (e) {

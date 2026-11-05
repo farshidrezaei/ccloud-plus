@@ -105,6 +105,20 @@ class _SingleSeriesScreenState extends State<SingleSeriesScreen> {
     String? nextUrl,
     String? nextTitle,
   }) {
+    if (source.url.trim().isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'لینک پخش برای این قسمت موجود نیست',
+              style: GoogleFonts.vazirmatn(),
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
     final settings = Provider.of<AppSettingsProvider>(context, listen: false);
     if (settings.defaultPlayer == DefaultPlayer.vlc) {
       _playWithVlc(source.url);
@@ -119,6 +133,7 @@ class _SingleSeriesScreenState extends State<SingleSeriesScreen> {
     String? nextUrl,
     String? nextTitle,
   }) {
+    if (url.trim().isEmpty) return;
     Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (context) => VideoPlayerScreen(

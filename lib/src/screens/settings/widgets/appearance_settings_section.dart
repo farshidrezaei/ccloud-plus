@@ -71,11 +71,11 @@ class _CacheManagementCardState extends State<_CacheManagementCard> {
 
   void _clearCache() async {
     await CacheManager.instance.clear();
-    setState(() {
-      _cacheCount = CacheManager.instance.count;
-      _cacheBytes = CacheManager.instance.sizeInBytes;
-    });
     if (mounted) {
+      setState(() {
+        _cacheCount = CacheManager.instance.count;
+        _cacheBytes = CacheManager.instance.sizeInBytes;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
