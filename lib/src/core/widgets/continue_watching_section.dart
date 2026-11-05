@@ -110,7 +110,7 @@ class _ContinueWatchingCardState extends State<_ContinueWatchingCard> {
   bool _isHovered = false;
 
   void _resumePlayback() {
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (context) => VideoPlayerScreen(
           videoUrl: widget.item.videoUrl,

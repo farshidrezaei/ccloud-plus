@@ -224,7 +224,7 @@ class _FloatingMiniPlayerState extends State<FloatingMiniPlayer> {
 
     miniPlayer.undock();
 
-    Navigator.of(context).push(
+    Navigator.of(context, rootNavigator: true).push(
       MaterialPageRoute(
         builder: (context) => VideoPlayerScreen(
           videoUrl: url,

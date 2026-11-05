@@ -87,6 +87,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       _videoController = widget.existingVideoController!;
       _isLoading = false;
     } else {
+      final settings = Provider.of<AppSettingsProvider>(context, listen: false);
       // High-performance streaming configuration with 300MB RAM buffer
       _player = Player(
         configuration: const PlayerConfiguration(
@@ -94,7 +95,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
           bufferSize: 300 * 1024 * 1024,
         ),
       );
-      _videoController = VideoController(_player);
+      _videoController = VideoController(
+        _player,
+        configuration: VideoControllerConfiguration(
+          hwdec: settings.hwdec,
+          enableHardwareAcceleration: settings.enableHardwareAcceleration,
+        ),
+      );
       _startPlayback();
     }
 
@@ -188,7 +195,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     _countdownTimer?.cancel();
     if (widget.nextEpisodeUrl == null) return;
 
-    Navigator.of(context).pushReplacement(
+    Navigator.of(context, rootNavigator: true).pushReplacement(
       MaterialPageRoute(
         builder: (_) => VideoPlayerScreen(
           videoUrl: widget.nextEpisodeUrl!,
@@ -215,8 +222,10 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     });
 
     try {
+      final settings = Provider.of<AppSettingsProvider>(context, listen: false);
       final platform = _player.platform as dynamic;
       // High-performance streaming & caching options for MPV
+      await platform?.setProperty('hwdec', settings.hwdec);
       await platform?.setProperty('network-timeout', '30');
       await platform?.setProperty('tls-verify', 'no');
       await platform?.setProperty('ytdl', 'no');
@@ -320,18 +329,32 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
     super.dispose();
   }
 
-  void _dockToMiniPlayer() {
+  void _exitPlayer() async {
+    if (_isFullscreen) {
+      await windowManager.setFullScreen(false);
+    }
+    if (mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
+  void _dockToMiniPlayer() async {
     _isDocking = true;
     _saveCurrentWatchProgress();
-    Provider.of<MiniPlayerProvider>(context, listen: false).dock(
-      player: _player,
-      videoController: _videoController,
-      title: widget.title,
-      videoUrl: widget.videoUrl,
-      mediaItem: widget.mediaItem,
-      episodeTitle: widget.episodeTitle,
-    );
-    Navigator.of(context).pop();
+    if (_isFullscreen) {
+      await windowManager.setFullScreen(false);
+    }
+    if (mounted) {
+      Provider.of<MiniPlayerProvider>(context, listen: false).dock(
+        player: _player,
+        videoController: _videoController,
+        title: widget.title,
+        videoUrl: widget.videoUrl,
+        mediaItem: widget.mediaItem,
+        episodeTitle: widget.episodeTitle,
+      );
+      Navigator.of(context, rootNavigator: true).pop();
+    }
   }
 
   void _startHideTimer() {
@@ -442,7 +465,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
       if (_isFullscreen) {
         _toggleFullscreen();
       } else {
-        Navigator.of(context).pop();
+        _exitPlayer();
       }
       return KeyEventResult.handled;
     }
@@ -634,134 +657,62 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                           ),
                         ),
 
-                        // Top Bar: Back, Title, Episode badge, Quick action glass bar
+                        // Top Bar: Back button, Title & Episode badge (RTL)
                         Positioned(
                           top: 24,
                           left: 24,
                           right: 24,
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(
-                                  Icons.arrow_back_rounded,
-                                  color: Colors.white,
-                                  size: 26,
+                          child: Directionality(
+                            textDirection: TextDirection.rtl,
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.arrow_forward_rounded,
+                                    color: Colors.white,
+                                    size: 26,
+                                  ),
+                                  tooltip: 'بازگشت (Esc)',
+                                  onPressed: _exitPlayer,
                                 ),
-                                tooltip: 'بازگشت (Esc)',
-                                onPressed: () => Navigator.of(context).pop(),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Text(
-                                      widget.title,
-                                      style: GoogleFonts.vazirmatn(
-                                        color: Colors.white,
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        shadows: const [
-                                          Shadow(
-                                            color: Colors.black,
-                                            blurRadius: 8,
-                                          ),
-                                        ],
-                                      ),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    if (widget.episodeTitle != null) ...[
-                                      const SizedBox(height: 2),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
                                       Text(
-                                        widget.episodeTitle!,
+                                        widget.title,
                                         style: GoogleFonts.vazirmatn(
-                                          color: Colors.white70,
-                                          fontSize: 12,
+                                          color: Colors.white,
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold,
+                                          shadows: const [
+                                            Shadow(
+                                              color: Colors.black,
+                                              blurRadius: 8,
+                                            ),
+                                          ],
                                         ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
                                       ),
+                                      if (widget.episodeTitle != null) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          widget.episodeTitle!,
+                                          style: GoogleFonts.vazirmatn(
+                                            color: Colors.white70,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
                                     ],
-                                  ],
-                                ),
-                              ),
-                              // Top Right Glass Pill Bar
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(
-                                    0xFF13151F,
-                                  ).withValues(alpha: 0.8),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: Colors.white12,
-                                    width: 0.8,
                                   ),
                                 ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    // Aspect Ratio Toggle
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.aspect_ratio_rounded,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      tooltip: 'نسبت تصویر: $_aspectRatioLabel',
-                                      onPressed: _cycleAspectRatio,
-                                    ),
-                                    // Audio & Subtitles
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.subtitles_rounded,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      tooltip: 'زیرنویس و صدا',
-                                      onPressed: _showTrackSelectionDialog,
-                                    ),
-                                    // PiP
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.picture_in_picture_alt_rounded,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      tooltip: 'تصویر در تصویر (PiP)',
-                                      onPressed: _dockToMiniPlayer,
-                                    ),
-                                    // VLC
-                                    IconButton(
-                                      icon: const Icon(
-                                        Icons.tv_rounded,
-                                        color: Colors.white,
-                                        size: 20,
-                                      ),
-                                      tooltip: 'پخش با VLC',
-                                      onPressed: () => VLCLauncher.launchInVLC(
-                                        widget.videoUrl,
-                                      ),
-                                    ),
-                                    // Fullscreen
-                                    IconButton(
-                                      icon: Icon(
-                                        _isFullscreen
-                                            ? Icons.fullscreen_exit_rounded
-                                            : Icons.fullscreen_rounded,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
-                                      tooltip: 'تمام‌صفحه (F)',
-                                      onPressed: _toggleFullscreen,
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
 
@@ -912,7 +863,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                       );
                                     },
                                   ),
-                                  const Spacer(),
+                                  const SizedBox(width: 8),
 
                                   // Volume Control
                                   StreamBuilder<double>(
@@ -966,47 +917,138 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen>
                                     },
                                   ),
 
-                                  const SizedBox(width: 14),
+                                  const Spacer(),
 
-                                  // Playback Speed Button
-                                  PopupMenuButton<double>(
-                                    initialValue: _playbackSpeed,
-                                    tooltip: 'سرعت پخش',
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 4,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(
-                                          color: Colors.white30,
-                                        ),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Text(
-                                        '${_playbackSpeed}x',
-                                        style: GoogleFonts.spaceMono(
-                                          color: Colors.white,
-                                          fontSize: 12,
-                                        ),
+                                  // Action Controls Pill (Speed, Aspect ratio, Audio & Subtitles, PiP, VLC, Fullscreen)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 3,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(
+                                        0xFF13151F,
+                                      ).withValues(alpha: 0.8),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Colors.white12,
+                                        width: 0.8,
                                       ),
                                     ),
-                                    itemBuilder: (context) =>
-                                        [0.5, 0.75, 1.0, 1.25, 1.5, 2.0].map((
-                                          speed,
-                                        ) {
-                                          return PopupMenuItem<double>(
-                                            value: speed,
-                                            child: Text('${speed}x'),
-                                          );
-                                        }).toList(),
-                                    onSelected: (speed) {
-                                      setState(() {
-                                        _playbackSpeed = speed;
-                                      });
-                                      _player.setRate(speed);
-                                      _onUserInteraction();
-                                    },
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        // Playback Speed Button
+                                        PopupMenuButton<double>(
+                                          initialValue: _playbackSpeed,
+                                          tooltip: 'سرعت پخش',
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              border: Border.all(
+                                                color: Colors.white30,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(6),
+                                            ),
+                                            child: Text(
+                                              '${_playbackSpeed}x',
+                                              style: GoogleFonts.spaceMono(
+                                                color: Colors.white,
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                          ),
+                                          itemBuilder: (context) =>
+                                              [
+                                                0.5,
+                                                0.75,
+                                                1.0,
+                                                1.25,
+                                                1.5,
+                                                2.0,
+                                              ].map((speed) {
+                                                return PopupMenuItem<double>(
+                                                  value: speed,
+                                                  child: Text('${speed}x'),
+                                                );
+                                              }).toList(),
+                                          onSelected: (speed) {
+                                            setState(() {
+                                              _playbackSpeed = speed;
+                                            });
+                                            _player.setRate(speed);
+                                            _onUserInteraction();
+                                          },
+                                        ),
+                                        const SizedBox(width: 4),
+
+                                        // Aspect Ratio Toggle
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.aspect_ratio_rounded,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          tooltip:
+                                              'نسبت تصویر: $_aspectRatioLabel',
+                                          onPressed: _cycleAspectRatio,
+                                        ),
+
+                                        // Audio & Subtitles
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.subtitles_rounded,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          tooltip: 'زیرنویس و صدا',
+                                          onPressed: _showTrackSelectionDialog,
+                                        ),
+
+                                        // PiP
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons
+                                                .picture_in_picture_alt_rounded,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          tooltip: 'تصویر در تصویر (PiP)',
+                                          onPressed: _dockToMiniPlayer,
+                                        ),
+
+                                        // VLC
+                                        IconButton(
+                                          icon: const Icon(
+                                            Icons.tv_rounded,
+                                            color: Colors.white,
+                                            size: 20,
+                                          ),
+                                          tooltip: 'پخش با VLC',
+                                          onPressed: () =>
+                                              VLCLauncher.launchInVLC(
+                                                widget.videoUrl,
+                                              ),
+                                        ),
+
+                                        // Fullscreen
+                                        IconButton(
+                                          icon: Icon(
+                                            _isFullscreen
+                                                ? Icons.fullscreen_exit_rounded
+                                                : Icons.fullscreen_rounded,
+                                            color: Colors.white,
+                                            size: 22,
+                                          ),
+                                          tooltip: 'تمام‌صفحه (F)',
+                                          onPressed: _toggleFullscreen,
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
                               ),

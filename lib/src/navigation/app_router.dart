@@ -37,7 +37,10 @@ CustomTransitionPage<void> _buildPageWithTransition({
   );
 }
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 final GoRouter appRouter = GoRouter(
+  navigatorKey: rootNavigatorKey,
   initialLocation: '/movies',
   routes: <RouteBase>[
     GoRoute(path: '/', redirect: (_, __) => '/movies'),

@@ -92,6 +92,22 @@ class PlayerSettingsSection extends StatelessWidget {
           activeTrackColor: AppColors.brandRed,
           onChanged: (val) => settings.setAutoPlayNext(val),
         ),
+        const SizedBox(height: 16),
+
+        // Hardware Decoding
+        SwitchListTile(
+          title: Text(
+            'شتاب سخت‌افزاری (Hardware Decoding)',
+            style: GoogleFonts.vazirmatn(fontWeight: FontWeight.bold),
+          ),
+          subtitle: Text(
+            'در صورت عدم نمایش تصویر یا نمایش صفحه آبی/سیاه، این گزینه را خاموش نگه دارید (رمزگشایی نرم‌افزاری پایدار)',
+            style: GoogleFonts.vazirmatn(fontSize: 12),
+          ),
+          value: settings.hardwareDecoding,
+          activeTrackColor: AppColors.brandRed,
+          onChanged: (val) => settings.setHardwareDecoding(val),
+        ),
         const SizedBox(height: 32),
 
         // Keyboard Shortcuts Reference Table

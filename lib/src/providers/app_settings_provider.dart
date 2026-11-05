@@ -85,6 +85,7 @@ class AppSettingsProvider with ChangeNotifier {
   static const String _keyDefaultPlayer = 'settings_default_player';
   static const String _keySeekStep = 'settings_seek_step';
   static const String _keyAutoPlayNext = 'settings_auto_play_next';
+  static const String _keyHardwareDecoding = 'settings_hardware_decoding';
 
   // Subtitle Defaults
   double _subtitleFontSize = 22.0;
@@ -98,6 +99,7 @@ class AppSettingsProvider with ChangeNotifier {
   DefaultPlayer _defaultPlayer = DefaultPlayer.internal;
   int _seekStepSeconds = 10;
   bool _autoPlayNext = true;
+  bool _hardwareDecoding = false;
 
   bool _isLoaded = false;
 
@@ -114,6 +116,9 @@ class AppSettingsProvider with ChangeNotifier {
   DefaultPlayer get defaultPlayer => _defaultPlayer;
   int get seekStepSeconds => _seekStepSeconds;
   bool get autoPlayNext => _autoPlayNext;
+  bool get hardwareDecoding => _hardwareDecoding;
+  bool get enableHardwareAcceleration => _hardwareDecoding;
+  String get hwdec => _hardwareDecoding ? 'auto-safe' : 'no';
   bool get isLoaded => _isLoaded;
 
   Future<void> _loadSettings() async {
@@ -148,9 +153,17 @@ class AppSettingsProvider with ChangeNotifier {
 
     _seekStepSeconds = prefs.getInt(_keySeekStep) ?? 10;
     _autoPlayNext = prefs.getBool(_keyAutoPlayNext) ?? true;
+    _hardwareDecoding = prefs.getBool(_keyHardwareDecoding) ?? false;
 
     _isLoaded = true;
     notifyListeners();
+  }
+
+  Future<void> setHardwareDecoding(bool enabled) async {
+    _hardwareDecoding = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyHardwareDecoding, enabled);
   }
 
   Future<void> setSubtitleFontSize(double size) async {

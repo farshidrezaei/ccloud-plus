@@ -423,7 +423,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               if (isCompleted) ...[
                 ElevatedButton.icon(
                   onPressed: () {
-                    Navigator.of(context).push(
+                    Navigator.of(context, rootNavigator: true).push(
                       MaterialPageRoute(
                         builder: (context) => VideoPlayerScreen(
                           videoUrl: task.localPath,

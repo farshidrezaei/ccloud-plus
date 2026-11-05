@@ -157,7 +157,7 @@ class _HeroSlideItemState extends State<_HeroSlideItem> {
   void _watchMovie() {
     final item = widget.item;
     if (item.sources.isNotEmpty) {
-      Navigator.of(context).push(
+      Navigator.of(context, rootNavigator: true).push(
         MaterialPageRoute(
           builder: (context) => VideoPlayerScreen(
             videoUrl: item.sources.first.url,
