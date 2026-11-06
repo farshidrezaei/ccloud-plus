@@ -1,7 +1,7 @@
 #define MyAppName "CCloud+"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.1.3"
 #define MyAppPublisher "Farshid Rezaei"
-#define MyAppURL "https://github.com/farshidrezaei/ccloud-plus"
+#define MyAppURL "https://github.com/farshidrezaei/ccloud-plus-desktop"
 #define MyAppExeName "ccloud_plus.exe"
 
 [Setup]

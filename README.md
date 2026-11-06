@@ -190,8 +190,8 @@ sudo apt-get install -y clang cmake ninja-build pkg-config \
 ### Setup & Run
 ```bash
 # 1. Clone the repository
-git clone https://github.com/<your-username>/CCloud-Plus.git
-cd CCloud-Plus
+git clone https://github.com/farshidrezaei/ccloud-plus-desktop.git
+cd ccloud-plus-desktop
 
 # 2. Install Flutter packages
 flutter pub get

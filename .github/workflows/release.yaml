@@ -174,7 +174,7 @@ jobs:
             -n ccloud-plus \
             -v "$VERSION" \
             --description "CCloud+ (CCloud Plus) - Modern Desktop Streaming Platform" \
-            --url "https://github.com/farshidrezaei/ccloud-plus" \
+            --url "https://github.com/farshidrezaei/ccloud-plus-desktop" \
             --maintainer "Farshid Rezaei <farshid.net1@gmail.com>" \
             --vendor "Farshid Rezaei" \
             --license "MIT" \
@@ -191,7 +191,7 @@ jobs:
             -n ccloud-plus \
             -v "$VERSION" \
             --description "CCloud+ (CCloud Plus) - Modern Desktop Streaming Platform" \
-            --url "https://github.com/farshidrezaei/ccloud-plus" \
+            --url "https://github.com/farshidrezaei/ccloud-plus-desktop" \
             --maintainer "Farshid Rezaei <farshid.net1@gmail.com>" \
             --vendor "Farshid Rezaei" \
             --license "MIT" \
@@ -278,14 +278,14 @@ jobs:
 
             | Platform | Package Format | Download Link |
             |:---|:---:|:---|
-            | **Windows (x64)** | Setup Installer (`.exe`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Setup.exe) |
-            | **Windows (x64)** | Portable ZIP (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Portable.zip) |
-            | **macOS (Universal)** | Apple Disk Image (`.dmg`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.dmg) |
-            | **macOS (Universal)** | Compressed App (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.zip) |
-            | **Linux (x64)** | AppImage Standalone | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x86_64.AppImage) |
-            | **Linux (x64)** | Debian / Ubuntu (`.deb`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus_${{ steps.vars.outputs.VERSION }}_amd64.deb) |
-            | **Linux (x64)** | Fedora / RHEL (`.rpm`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus-${{ steps.vars.outputs.VERSION }}-1.x86_64.rpm) |
-            | **Linux (x64)** | Binary Tarball (`.tar.gz`) | [Download](https://github.com/farshidrezaei/ccloud-plus/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x64.tar.gz) |
+            | **Windows (x64)** | Setup Installer (`.exe`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Setup.exe) |
+            | **Windows (x64)** | Portable ZIP (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Windows-Portable.zip) |
+            | **macOS (Universal)** | Apple Disk Image (`.dmg`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.dmg) |
+            | **macOS (Universal)** | Compressed App (`.zip`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-macOS-Universal.zip) |
+            | **Linux (x64)** | AppImage Standalone | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x86_64.AppImage) |
+            | **Linux (x64)** | Debian / Ubuntu (`.deb`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus_${{ steps.vars.outputs.VERSION }}_amd64.deb) |
+            | **Linux (x64)** | Fedora / RHEL (`.rpm`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/ccloud-plus-${{ steps.vars.outputs.VERSION }}-1.x86_64.rpm) |
+            | **Linux (x64)** | Binary Tarball (`.tar.gz`) | [Download](https://github.com/farshidrezaei/ccloud-plus-desktop/releases/download/${{ steps.vars.outputs.TAG }}/CCloudPlus-${{ steps.vars.outputs.VERSION }}-Linux-x64.tar.gz) |
 
             ---
 

@@ -26,7 +26,7 @@ We love contributions! Whether you are fixing bugs, improving documentation, sub
 ### 3. Submitting Code Changes
 
 1. **Fork the Repository**:
-   Click Fork on [github.com/farshidrezaei/ccloud-plus](https://github.com/farshidrezaei/ccloud-plus).
+   Click Fork on [github.com/farshidrezaei/ccloud-plus-desktop](https://github.com/farshidrezaei/ccloud-plus-desktop).
 
 2. **Create a Topic Branch**:
    ```bash

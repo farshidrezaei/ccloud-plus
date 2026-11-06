@@ -25,7 +25,7 @@ ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
 echo -e "🔍 دریافت آخرین اطلاعات انتشار از گیت‌هاب..."
-LATEST_RELEASE=$(curl -s "https://api.github.com/repos/farshidrezaei/ccloud-plus/releases/latest")
+LATEST_RELEASE=$(curl -s "https://api.github.com/repos/farshidrezaei/ccloud-plus-desktop/releases/latest")
 TAG_NAME=$(echo "$LATEST_RELEASE" | grep -m1 '"tag_name":' | cut -d '"' -f 4)
 
 if [ -z "$TAG_NAME" ]; then
@@ -65,7 +65,7 @@ chmod +x "$BIN_DIR/ccloud_plus"
 # Download high-res logo if missing
 if [ ! -f "$ICON_DIR/ccloud_plus.png" ]; then
     echo -e "🎨 دانلود آیکون برنامه..."
-    curl -sL "https://raw.githubusercontent.com/farshidrezaei/ccloud-plus/main/assets/logo.png" -o "$ICON_DIR/ccloud_plus.png"
+    curl -sL "https://raw.githubusercontent.com/farshidrezaei/ccloud-plus-desktop/main/assets/logo.png" -o "$ICON_DIR/ccloud_plus.png"
 fi
 
 # Create Desktop Entry
